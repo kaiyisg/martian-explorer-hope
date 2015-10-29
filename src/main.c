@@ -99,9 +99,6 @@ static uint32_t flashEnd = 0;
 
 static int reset_led_countdown = 0; // set to '1' if >3000 lux interrupt during survival mode
 
-// checks if all tasks have been completed within the time frame
-static int TASK_COMPLETED_FLAG = 0;
-
 /* ################# DEFINING AND WRAPPING OF TIMER ################### */
 
 volatile uint32_t msTicks;
@@ -117,21 +114,21 @@ uint32_t getMsTicks()
 
 /* ################# DEFINING SWITCHING ON AND OFF RGB ################### */
 
-void new_rgb_setLeds (uint8_t ledMask) // self defined function
+void new_rgb_setLeds (uint8_t ledMask) // self defined function to blink RGB
 {
-	// RGB_RED is off and required to turn on
+	// turn on RGB_RED only if off, else turn off RGB_RED
     if ((ledMask & RGB_RED) != 0 && (GPIO_ReadValue(2) & 0x01) == 0) {
         GPIO_SetValue( 2, 1); // write a 1 instead of 0
     } else {
         GPIO_ClearValue( 2, 1);
     }
-    // RGB_BLUE is off and required to turn on
+    // turn on RGB_BLUE only if off, else turn off RGB_BLUE
     if ((ledMask & RGB_BLUE) != 0 && (GPIO_ReadValue(0) & (1<<26)) == 0) {
         GPIO_SetValue( 0, (1<<26) );
     } else {
         GPIO_ClearValue( 0, (1<<26) );
     }
-    // RGB_BLUE is off and required to turn on
+    // turn on RGB_GREEN only if off, else turn off RGB_GREEN
     if ((ledMask & RGB_GREEN) != 0 && (GPIO_ReadValue(2) & (1<<1)) == 0) {
         GPIO_SetValue( 2, (1<<1) );
     } else {
@@ -367,15 +364,10 @@ void rgbBlinky (void) {
 /* ################# INITIALIZING HOPE ################### */
 
 static void initializeHOPE(void) {
-
 	SEGMENT_DISPLAY = '0';
-
 	while (SEGMENT_DISPLAY != 'G') { // increment until segment displays 'F'
-
 		led7seg_setChar(SEGMENT_DISPLAY, FALSE); // display new incremented value
-
 		Timer0_Wait(1000); // 1s interval
-
 		if (SEGMENT_DISPLAY == '6') {
 			SEGMENT_DISPLAY = 'A'; // change from number to alphabet
 		} else {
@@ -394,7 +386,6 @@ void EINT3_IRQHandler(void) {
 		reset_led_countdown = 1;
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
-
 	}
 
 	if ((LPC_GPIOINT->IO2IntStatR >> 5) &0x1) { // light sensor <3000 lux interrupt
@@ -411,18 +402,19 @@ void EINT3_IRQHandler(void) {
 		}
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
-
 	}
 
 	if ((LPC_GPIOINT->IO2IntStatF >> 10) & 0x1) { // SW3 interrupt
 		playSong(song);
 		LPC_GPIOINT->IO2IntClr = (1<<10);
 	}
-
 }
 
+/* ################# COUNTERS FOR TASKS ################### */
+static const int RGB_COUNTER_LIMIT = (1000+TIMEFRAME-1)/TIMEFRAME; // to obtain ceiling of division of 1000ms by TIMEFRAME
+static int rgb_Counter = 0;
 
-/* ################# INITIALIZING EXPLORER MODE ################### */
+/* ################# TASK HANDLERS ################### */
 
 static void explorerTasks(void){
 	INITIAL_TIME = getMsTicks();
@@ -510,8 +502,12 @@ static void survivalTasks(void) {
     OPERATION_MODE = EXPLORER_MODE; // return to explorer mode
 }
 
-static void globalTasks(void){
-
+static void genericTasks(void){
+	rgb_Counter++;
+	if (rgb_Counter == RGB_COUNTER_LIMIT) {
+		rgbBlinky();
+		rgb_Counter = 0;
+	}
 }
 
 int main (void) {
@@ -587,13 +583,12 @@ int main (void) {
     	}
     	INITIAL_TIME = CURRENT_TIME;
 
-    	globalTasks();
+    	genericTasks();
     	if(OPERATION_MODE == EXPLORER_MODE){
     		explorerTasks();
     	} else {
     		survivalTasks();
     	}
-    	//useful comment
     }
 }
 
