@@ -413,45 +413,29 @@ void EINT3_IRQHandler(void) {
 /* ################# COUNTERS FOR TASKS ################### */
 static const int RGB_COUNTER_LIMIT = (1000+TIMEFRAME-1)/TIMEFRAME; // to obtain ceiling of division of 1000ms by TIMEFRAME
 static int rgb_Counter = 0;
+static const int SAMPLING_COUNTER_LIMIT = (SAMPLING_TIME+TIMEFRAME-1)/TIMEFRAME;
+static int sampling_Counter = 0;
+static char Array[20]; //array to write
 
 /* ################# TASK HANDLERS ################### */
 
 static void explorerTasks(void){
 
+	sampling_Counter++;
 
-	char Array[20]; //array to write
-
-	//char output[] = "L%d_T%d_AX%d_AY%d_AZ%d\n";
-	//int timeCounter = 0; //initialize time counter, increments every 500ms
-	//static int TIME_TOGGLE_LED = 2; //1000ms/500ms=2
-	//static int TIME_TOGGLE_INDICATOR = SAMPLING_TIME/500; //2000ms/500ms=4
-/*
-		if(timeCounter%TIME_TOGGLE_LED==0){
-			toggleLEDS();
-		}
-
-		if(timeCounter%TIME_TOGGLE_INDICATOR==0){
-			refreshIndicator();
-		}
-
-		while(CURRENT_TIME - INITIAL_TIME < 500){
-			CURRENT_TIME = getMsTicks();
-		}//time base of 0.5 seconds
-		timeCounter++;
-		INITIAL_TIME = CURRENT_TIME;
-*/
+	if(sampling_Counter==SAMPLING_COUNTER_LIMIT){
+		sampling_Counter=0; //reset counter
 		int32_t light_value = readLightSensor();
 		int32_t temp_value = readTempSensor();
 		int32_t *xyz_values;
 		xyz_values = readAccelerometer();
 		sprintf(Array, "L%d_T%d_AX%d_AY%d_AZ%d\n", light_value, temp_value,
-				*(xyz_values), *(xyz_values+1), *(xyz_values+2));
-		//printValues(light_value,temp_value,*xyz_values);
+						*(xyz_values), *(xyz_values+1), *(xyz_values+2));
 		oled_putString(0,20,(uint8_t*)Array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		INITIAL_TIME = CURRENT_TIME;
 		// TRANSMIT DATA TO HOME
-		// CONDITION TO EXIT EXPLORER
-
+	}
+	//print values not working!
+	//printValues(light_value,temp_value,*xyz_values);
 }
 
 /*
