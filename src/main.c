@@ -391,14 +391,7 @@ void EINT3_IRQHandler(void) {
 	if ((LPC_GPIOINT->IO2IntStatR >> 5) &0x1) { // light sensor <3000 lux interrupt
 		flashEnd = getMsTicks();
 		if (flashEnd - flashBeginning < 500) {
-			uint32_t tempArray[9];
-			memcpy(tempArray, recentFlashes, 9); // copy values into tempArray
-			int i=0;
-			while (i<9) {
-				recentFlashes[i] = tempArray[i+1];
-				i++;
-			}
-			recentFlashes[9] = flashEnd; // push new value in
+			LIGHTNING_THRESHOLD_FLAG = 1;
 		}
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
@@ -415,11 +408,22 @@ static const int RGB_COUNTER_LIMIT = (1000+TIMEFRAME-1)/TIMEFRAME; // to obtain 
 static int rgb_Counter = 0;
 static const int SAMPLING_COUNTER_LIMIT = (SAMPLING_TIME+TIMEFRAME-1)/TIMEFRAME;
 static int sampling_Counter = 0;
+
+static int LIGHTNING_THRESHOLD_FLAG = 0; //flag is raised when LIGHTNIGN THRESHOLD is raised in interupts
+
+
 static char Array[20]; //array to write
 
 /* ################# TASK HANDLERS ################### */
 
 static void explorerTasks(void){
+
+	//checking if in past LIGHTNING_TIME_WINDOW lightning threshold exceeded 3 times
+	if(recentFlashes[6]!=0 && recentFlashes[7]!=0 && recentFlashes[8]!=0
+			&& (recentFlashes[6]-recentFlashes[8]<=LIGHTNING_TIME_WINDOW)){
+		OPERATION_MODE = SURVIVAL_MODE;
+		return; //exit explorer tasks
+	}
 
 	sampling_Counter++;
 
@@ -479,11 +483,34 @@ static void survivalTasks(void) {
 }
 
 static void genericTasks(void){
+
+	//DOES NOT WORK, ASSUMES LIGHTNING THRESHOLD CAN ONLY BE RAISED ONCE EVERY 50MS
+	//NEED TO CHANGE TO A DIFFERENT IMPLEMENTATION! (STORE LIGHTNING THRESHOLD IN ARRAY,
+	//COUNT DOWN LIGHTNING THRESHOLD FLAG?
+	if(LIGHTNING_THRESHOLD_FLAG==1){
+		uint32_t tempArray[9];
+		memcpy(tempArray, recentFlashes, 9); // copy values into tempArray
+		int i=0;
+		while (i<8) {
+			recentFlashes[i] = tempArray[i+1];
+			i++;
+		}
+		recentFlashes[8] = flashEnd; // push new value in
+		LIGHTNING_THRESHOLD_FLAG=0; //RESET LIGHTNING THRESHOLD FLAG
+	}
+
+	//count lightning threshold up till 9
+
+	//make rbg blink according to survivor or explorer mode
 	rgb_Counter++;
 	if (rgb_Counter == RGB_COUNTER_LIMIT) {
 		rgbBlinky();
 		rgb_Counter = 0;
 	}
+
+
+
+
 }
 
 int main (void) {
