@@ -97,6 +97,8 @@ static uint32_t recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
 static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
 
+static int reset_led_countdown = 0; // set to '1' if >3000 lux interrupt during survival mode
+
 // checks if all tasks have been completed within the time frame
 static int TASK_COMPLETED_FLAG = 0;
 
@@ -388,6 +390,7 @@ static void initializeHOPE(void) {
 void EINT3_IRQHandler(void) {
 	if ((LPC_GPIOINT->IO2IntStatF >> 5) & 0x1) { // light sensor >3000 lux interrupt
 		flashBeginning = getMsTicks();
+		reset_led_countdown = 1;
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
 
@@ -501,7 +504,9 @@ static void survivalTasks(void) {
             light_value = readLightSensor(); // refresh light_value
         }
         ledOn = 0xffff; // failed condition, restart LED sequence
+        reset_led_countdown = 0;
     }
+    OPERATION_MODE = EXPLORER_MODE; // return to explorer mode
 }
 
 static void globalTasks(void){
