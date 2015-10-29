@@ -400,7 +400,6 @@ void EINT3_IRQHandler(void) {
 	}
 
 	if ((LPC_GPIOINT->IO2IntStatF >> 10) & 0x1) { // SW3 interrupt
-		playSong(song);
 		LPC_GPIOINT->IO2IntClr = (1<<10);
 	}
 }
