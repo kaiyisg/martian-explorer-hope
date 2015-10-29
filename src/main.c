@@ -587,6 +587,7 @@ int main (void) {
     	} else {
     		survivalTasks();
     	}
+    	//useful comment
     }
 }
 
