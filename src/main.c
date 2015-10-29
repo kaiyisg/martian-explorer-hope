@@ -48,11 +48,11 @@
 
 /* ################# ASSIGNMENT SPECIFICATIONS ################# */
 
-static uint32_t SAMPLING_TIME = 2000; // ms
-static uint32_t LIGHTNING_TIME_WINDOW = 3000; // ms
-static uint32_t LIGHTNING_MONITORING = 3000; // lux
-static uint32_t LIGHTNING_THRESHOLD = 3000; // lux
-static uint32_t TIME_UNIT = 250; // ms
+#define SAMPLING_TIME 2000 // ms, intervals sensor senses in explorer mode
+#define LIGHTNING_TIME_WINDOW 3000 // ms
+#define LIGHTNING_MONITORING 3000 // lux
+#define LIGHTNING_THRESHOLD 3000 // lux
+#define TIME_UNIT 250 // ms
 
 static uint32_t RESET_INITIAL = 1;
 static uint32_t INITIAL_TIME = 0;
@@ -62,8 +62,8 @@ static uint32_t SEGMENT_DISPLAY = 0;
 static uint8_t INDICATOR_EXPLORER = RGB_BLUE;
 static uint8_t INDICATOR_SURVIVAL = RGB_RED;
 
-static char ENTER_SURVIVAL_MESSAGE[] = "Lightning Detected. Scheduled Telemetry is Temporarily Suspended.\n";
-static char EXIT_SURVIVAL_MESSAGE[] = "Lightning Has Subsided. Scheduled Telemetry Will Now Resume.\n";
+static const char ENTER_SURVIVAL_MESSAGE[] = "Lightning Detected. Scheduled Telemetry is Temporarily Suspended.\n";
+static const char EXIT_SURVIVAL_MESSAGE[] = "Lightning Has Subsided. Scheduled Telemetry Will Now Resume.\n";
 
 
 /* ################# GLOBAL CONSTANTS ################# */
@@ -424,19 +424,14 @@ void EINT3_IRQHandler(void) {
 /* ################# INITIALIZING EXPLORER MODE ################### */
 
 static void explorerTasks(void){
-	INITIAL_TIME = getMsTicks();
-	CURRENT_TIME = getMsTicks();
+
+
+	char Array[20]; //array to write
 
 	//char output[] = "L%d_T%d_AX%d_AY%d_AZ%d\n";
-
-	char Array[20];
-
 	//int timeCounter = 0; //initialize time counter, increments every 500ms
 	//static int TIME_TOGGLE_LED = 2; //1000ms/500ms=2
 	//static int TIME_TOGGLE_INDICATOR = SAMPLING_TIME/500; //2000ms/500ms=4
-
-
-	while(OPERATION_MODE == EXPLORER_MODE){ //condition here should be to stay in explorer mode
 /*
 		if(timeCounter%TIME_TOGGLE_LED==0){
 			toggleLEDS();
@@ -452,9 +447,6 @@ static void explorerTasks(void){
 		timeCounter++;
 		INITIAL_TIME = CURRENT_TIME;
 */
-		while (CURRENT_TIME - INITIAL_TIME < SAMPLING_TIME) {
-			CURRENT_TIME = getMsTicks();
-		}
 		int32_t light_value = readLightSensor();
 		int32_t temp_value = readTempSensor();
 		int32_t *xyz_values;
@@ -466,7 +458,7 @@ static void explorerTasks(void){
 		INITIAL_TIME = CURRENT_TIME;
 		// TRANSMIT DATA TO HOME
 		// CONDITION TO EXIT EXPLORER
-	}
+
 }
 
 /*
@@ -576,8 +568,7 @@ int main (void) {
     {
     	//checking for the condition that the below execution exceeds our TIMEFRAME
     	if(CURRENT_TIME - INITIAL_TIME > TIMEFRAME){
-    		//throw error
-    		while(1);
+    		while(1); //throw error, get stuck in this loop
     	}
 
     	//delay until the next TIMEFRAME INTERUPT
@@ -592,7 +583,6 @@ int main (void) {
     	} else {
     		survivalTasks();
     	}
-    	//useful comment
     }
 }
 
