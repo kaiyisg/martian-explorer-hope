@@ -88,6 +88,8 @@ static int8_t x = 0;
 static int8_t y = 0;
 static int8_t z = 0;
 
+static uint16_t ledOn = 0xffff; // pca9532 led bit pattern
+
 // FIFO Array containing timestamp of last 9 lightning flashes
 // first element is oldest value, last element is newest
 static uint32_t recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
@@ -97,7 +99,7 @@ static uint32_t recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
 static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
 
-static int reset_led_countdown = 0; // set to '1' if >3000 lux interrupt during survival mode
+static int reset_led_countdown = 0; // flag set to '1' if >3000 lux interrupt during survival mode
 
 /* ################# DEFINING AND WRAPPING OF TIMER ################### */
 
@@ -405,9 +407,11 @@ void EINT3_IRQHandler(void) {
 
 /* ################# COUNTERS FOR TASKS ################### */
 static const int RGB_COUNTER_LIMIT = (1000+TIMEFRAME-1)/TIMEFRAME; // to obtain ceiling of division of 1000ms by TIMEFRAME
-static int rgb_Counter = 0;
+static int rgb_Counter = RGB_COUNTER_LIMIT; // in order to run first execution
 static const int SAMPLING_COUNTER_LIMIT = (SAMPLING_TIME+TIMEFRAME-1)/TIMEFRAME;
-static int sampling_Counter = 0;
+static int sampling_Counter = SAMPLING_COUNTER_LIMIT;
+static const int LED_COUNTER_LIMIT = (TIME_UNIT+TIMEFRAME-1)/TIMEFRAME;
+static int led_Counter = LED_COUNTER_LIMIT;
 
 static int LIGHTNING_THRESHOLD_FLAG = 0; //flag is raised when LIGHTNIGN THRESHOLD is raised in interupts
 
@@ -457,29 +461,21 @@ void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 }*/
 
 static void survivalTasks(void) {
-    uint16_t ledOn = 0xffff;
-	INITIAL_TIME = getMsTicks();
-	CURRENT_TIME = getMsTicks();
-
-    while (OPERATION_MODE == SURVIVAL_MODE) {
-        pca9532_setLeds(ledOn, 0xffff);
-        int32_t light_value = readLightSensor();
-        while (light_value < LIGHTNING_MONITORING) {
-            while (CURRENT_TIME - INITIAL_TIME < TIME_UNIT) { // 250ms interval
-            	CURRENT_TIME = getMsTicks();
-            }
-            ledOn = ledOn >> 1; // MSB = 0 -> turn off one LED
-            pca9532_setLeds(ledOn, 0xffff);
-            INITIAL_TIME = CURRENT_TIME;
-            if (ledOn == 0) {
-            	break; // break out of loop if all LEDs are off
-            }
-            light_value = readLightSensor(); // refresh light_value
-        }
-        ledOn = 0xffff; // failed condition, restart LED sequence
-        reset_led_countdown = 0;
-    }
-    OPERATION_MODE = EXPLORER_MODE; // return to explorer mode
+	led_Counter++;
+	if (led_Counter == LED_COUNTER_LIMIT) {
+	    pca9532_setLeds(ledOn, 0xffff);
+	    if (reset_led_countdown == 0) {
+	    	ledOn = ledOn >> 1; // MSB = 0 -> turn off one LED
+	    } else { // lightning interrupt occurred, restart sequence
+	    	ledOn = 0xffff;
+	    	reset_led_countdown = 0;
+	    }
+	    if (ledOn == 0) { // no lightning in past 4s
+	    	pca9532_setLeds(0x0000, 0xffff);
+	    	OPERATION_MODE = EXPLORER_MODE;
+	    }
+	    led_Counter = 0; // reset and wait for next cycle
+	}
 }
 
 static void genericTasks(void){
