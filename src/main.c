@@ -117,21 +117,22 @@ uint32_t getMsTicks()
 
 /* ################# DEFINING SWITCHING ON AND OFF RGB ################### */
 
-void new_rgb_setLeds (uint8_t ledMask) // replace wrong function in library
+void new_rgb_setLeds (uint8_t ledMask) // self defined function
 {
-    if ((ledMask & RGB_RED) != 0) {
+	// RGB_RED is off and required to turn on
+    if ((ledMask & RGB_RED) != 0 && (GPIO_ReadValue(2) & 0x01) == 0) {
         GPIO_SetValue( 2, 1); // write a 1 instead of 0
     } else {
         GPIO_ClearValue( 2, 1);
     }
-
-    if ((ledMask & RGB_BLUE) != 0) {
+    // RGB_BLUE is off and required to turn on
+    if ((ledMask & RGB_BLUE) != 0 && (GPIO_ReadValue(0) & (1<<26)) == 0) {
         GPIO_SetValue( 0, (1<<26) );
     } else {
         GPIO_ClearValue( 0, (1<<26) );
     }
-
-    if ((ledMask & RGB_GREEN) != 0) {
+    // RGB_BLUE is off and required to turn on
+    if ((ledMask & RGB_GREEN) != 0 && (GPIO_ReadValue(2) & (1<<1)) == 0) {
         GPIO_SetValue( 2, (1<<1) );
     } else {
         GPIO_ClearValue( 2, (1<<1) );
@@ -323,7 +324,7 @@ static void init_GPIO(void)
 }
 
 
-/* ################# INITIALIZER FOR SENSORS ################### */
+/* ################# INITIALIZING PERIPHERALS ################### */
 
 static int32_t readTempSensor(void) {
 	int32_t temperature = temp_read();
@@ -584,7 +585,7 @@ int main (void) {
     	while (CURRENT_TIME - INITIAL_TIME < TIMEFRAME) { // 50MS INTERVAL
     		CURRENT_TIME = getMsTicks();
     	}
-    	INITIAL_TIME=CURRENT_TIME;
+    	INITIAL_TIME = CURRENT_TIME;
 
     	globalTasks();
     	if(OPERATION_MODE == EXPLORER_MODE){
