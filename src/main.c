@@ -36,6 +36,7 @@
 #include "lpc17xx_timer.h"
 #include "lpc17xx_uart.h"
 #include "stdio.h"
+#include <inttypes.h>
 
 #include "joystick.h"
 #include "pca9532.h"
@@ -69,9 +70,9 @@ static const char EXIT_SURVIVAL_MESSAGE[] = "Lightning Has Subsided. Scheduled T
 #define SURVIVAL_MODE 1
 
 // map timed functions to timer number
-#define PCA9532 0
-#define RGB 1
-#define SAMPLING 2
+#define PCA9532 1
+#define RGB 2
+#define SAMPLING 3
 
 /* ################# GLOBAL VARIABLES ################# */
 static int OPERATION_MODE = EXPLORER_MODE; // default starting operation mode explorer
@@ -103,13 +104,12 @@ static int RESET_LED_COUNTDOWN = 0; // flag set to '1' if >3000 lux interrupt du
 static int LIGHTNING_THRESHOLD_FLAG = 0; //flag is raised when LIGHTNIGN THRESHOLD is raised in interupts
 static int SW3_FLAG = 0;
 static int PCA9532_LED_COUNTDOWN_FLAG = 0;
-static int RGB_FLAG = 0;
 static int SAMPLING_FLAG = 0;
 static int UPDATE7SEG_FLAG = 0;
 
 /* ################# INTERRUPT PRIORITY SETTING ################### */
 
-void initPriority(void){
+void init_Priority(void){
 
 	uint32_t priority, PG = 5, PP, SP; // priority grouping, pre-empt priority, subpriority
 	NVIC_SetPriorityGrouping(5);
@@ -123,18 +123,18 @@ void initPriority(void){
 	// interrupt with smallest time interval is given higher priority
 	PP = 2, SP = 0;
 	priority = NVIC_EncodePriority(PG,PP,SP);
-	NVIC_SetPriority(TIMER0_IRQn, priority); // pca9532 led (250ms)
+	NVIC_SetPriority(TIMER1_IRQn, priority); // pca9532 led (250ms)
 	PP = 2, SP = 1;
 	priority = NVIC_EncodePriority(PG,PP,SP);
-	NVIC_SetPriority(TIMER1_IRQn, priority); // rgb (1s)
-	PP = 2, SP = 2;
+	NVIC_SetPriority(TIMER2_IRQn, priority); // rgb (1s)
+	PP = 3, SP = 2;
 	priority = NVIC_EncodePriority(PG,PP,SP);
-	NVIC_SetPriority(TIMER2_IRQn, priority); // sampling (2s)
+	NVIC_SetPriority(TIMER3_IRQn, priority); // sampling (2s)
 
 	NVIC_EnableIRQ(EINT3_IRQn);
-	NVIC_EnableIRQ(TIMER0_IRQn);
 	NVIC_EnableIRQ(TIMER1_IRQn);
 	NVIC_EnableIRQ(TIMER2_IRQn);
+	NVIC_EnableIRQ(TIMER3_IRQn);
 }
 
 /* ################# DEFINING AND SYSTICK ################### */
@@ -155,23 +155,17 @@ uint32_t getMsTicks()
 void new_rgb_setLeds (uint8_t ledMask) // self defined function to blink RGB depending on OPERATION_MODE
 {
 	// turn on RGB_RED only if off, else turn off RGB_RED
-    if ((ledMask & RGB_RED) != 0 && (GPIO_ReadValue(2) & 0x01) == 0) {
-        GPIO_SetValue( 2, 1); // write a 1 instead of 0
-    } else {
-        GPIO_ClearValue( 2, 1);
-    }
-    // turn on RGB_BLUE only if off, else turn off RGB_BLUE
-    if ((ledMask & RGB_BLUE) != 0 && (GPIO_ReadValue(0) & (1<<26)) == 0) {
-        GPIO_SetValue( 0, (1<<26) );
-    } else {
-        GPIO_ClearValue( 0, (1<<26) );
-    }
-    // turn on RGB_GREEN only if off, else turn off RGB_GREEN
-    if ((ledMask & RGB_GREEN) != 0 && (GPIO_ReadValue(2) & (1<<1)) == 0) {
-        GPIO_SetValue( 2, (1<<1) );
-    } else {
-        GPIO_ClearValue( 2, (1<<1) );
-    }
+	if ((ledMask & RGB_RED) != 0 && (GPIO_ReadValue(2)>>1 & 0x01) == 0) {
+		GPIO_SetValue( 2, 1); // write a 1 instead of 0
+	} else {
+		GPIO_ClearValue( 2, 1);
+	}
+	// turn on RGB_BLUE only if off, else turn off RGB_BLUE
+	if ((ledMask & RGB_BLUE) != 0 && (GPIO_ReadValue(1)>>26 & 0x01) == 0) {
+		GPIO_SetValue( 0, (1<<26) );
+	} else {
+		GPIO_ClearValue( 0, (1<<26) );
+	}
 }
 
 /* ################# DEFINING FUNCTION AND NOTES FOR SPEAKER ################### */
@@ -423,27 +417,28 @@ static void enableTimer(int timerNumber, uint32_t time) {
 	TIM_MatchConfigStruct.MatchValue = time;
 
 	LPC_TIM_TypeDef *TIMx; // select Timer0, Timer1 or Timer2
-	if (timerNumber == 0) {
-		TIMx = LPC_TIM0;
-	} else if (timerNumber == 1) {
+	if (timerNumber == 1) {
 		TIMx = LPC_TIM1;
 	} else if (timerNumber == 2) {
 		TIMx = LPC_TIM2;
+	} else if (timerNumber == 3) {
+		TIMx = LPC_TIM3;
 	}
 
 	// Set configuration for Tim_config and Tim_MatchConfig
 	TIM_Init(TIMx,TIM_TIMER_MODE,&TIM_ConfigStruct);
 	TIM_ConfigMatch(TIMx,&TIM_MatchConfigStruct);
+	TIM_Cmd(TIMx, ENABLE);
 }
 
 static void disableTimer(int timerNumber) {
 	LPC_TIM_TypeDef *TIMx;
-	if (timerNumber == 0) {
-		TIMx = LPC_TIM0;
-	} else if (timerNumber == 1) {
+	if (timerNumber == 1) {
 		TIMx = LPC_TIM1;
 	} else if (timerNumber == 2) {
 		TIMx = LPC_TIM2;
+	} else if (timerNumber == 3) {
+		TIMx = LPC_TIM3;
 	}
 	TIM_DeInit(TIMx);
 }
@@ -466,19 +461,26 @@ static void initializeHOPE(void) {
 
 /* ################# INITIALIZING INTERUPTS ################### */
 
-void TIMER0_IRQHandler(void){
-	PCA9532_LED_COUNTDOWN_FLAG = 1;
-	TIM_ClearIntPending(LPC_TIM0,0);
-}
-
 void TIMER1_IRQHandler(void){
-	RGB_FLAG = 1;
+	PCA9532_LED_COUNTDOWN_FLAG = 1;
 	TIM_ClearIntPending(LPC_TIM1,0);
 }
 
 void TIMER2_IRQHandler(void){
-	SAMPLING_FLAG = 1;
+
+	rgbBlinky();
+//	RGB_FLAG = 1;
+	if (RGB_ON == 1) {
+		RGB_ON = 0;
+	} else {
+		RGB_ON = 1;
+	}
 	TIM_ClearIntPending(LPC_TIM2,0);
+}
+
+void TIMER3_IRQHandler(void){
+	SAMPLING_FLAG = 1;
+	TIM_ClearIntPending(LPC_TIM3,0);
 }
 
 void EINT3_IRQHandler(void) {
@@ -593,11 +595,6 @@ static void genericTasks(void){
     	disableTimer(SAMPLING);
 	}
 
-	//make rbg blink according to survivor or explorer mode
-	if (RGB_FLAG == 1) {
-		RGB_FLAG = 0;
-		rgbBlinky();
-	}
 	if (SW3_FLAG == 1) {
 		SW3_FLAG = 0;
 	}
@@ -608,7 +605,7 @@ int main (void) {
     init_i2c();
     init_ssp();
     init_GPIO();
-    initPriority();
+    init_Priority();
 
     pca9532_init();
     joystick_init();
@@ -627,7 +624,6 @@ int main (void) {
     LPC_GPIOINT->IO2IntEnF |= 1 << 5; // light sensor >3000 lux interrupt (P2.5)
     LPC_GPIOINT->IO2IntEnR |= 1 << 5; // light sensor <3000 lux interrupt (P2.5)
     LPC_GPIOINT->IO2IntEnF |= 1 << 10; // SW3 (P2.10)
-    NVIC_EnableIRQ(EINT3_IRQn);
 
     if(SysTick_Config(SystemCoreClock/1000)){
     	while(1); //capture error
@@ -658,8 +654,9 @@ int main (void) {
     // Initialize OLED
     oled_clearScreen(OLED_COLOR_BLACK);
 
-	initializeHOPE();
+	//initializeHOPE();
 	enableTimer(RGB, 1000); // RGB will blink throughout operation
+	enableTimer(SAMPLING, 2000); //enable sampling timer when first going into loop
 
     while (1)
     {
