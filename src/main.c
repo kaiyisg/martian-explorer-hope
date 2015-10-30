@@ -34,6 +34,7 @@
 #include "lpc17xx_i2c.h"
 #include "lpc17xx_ssp.h"
 #include "lpc17xx_timer.h"
+#include "lpc17xx_uart.h"
 #include "stdio.h"
 
 #include "joystick.h"
@@ -45,7 +46,6 @@
 #include "led7seg.h"
 #include "light.h"
 
-
 /* ################# ASSIGNMENT SPECIFICATIONS ################# */
 
 #define SAMPLING_TIME 2000 // ms, intervals sensor senses in explorer mode
@@ -54,27 +54,24 @@
 #define LIGHTNING_THRESHOLD 3000 // lux
 #define TIME_UNIT 250 // ms
 
-static uint32_t RESET_INITIAL = 1;
-static uint32_t INITIAL_TIME = 0;
-static uint32_t CURRENT_TIME = 0;
-static uint32_t SEGMENT_DISPLAY = 0;
+#define INDICATOR_EXPLORER RGB_BLUE
+#define INDICATOR_SURVIVAL RGB_RED
 
-static uint8_t INDICATOR_EXPLORER = RGB_BLUE;
-static uint8_t INDICATOR_SURVIVAL = RGB_RED;
+static uint32_t CURRENT_TIME = 0;
+static uint32_t SEGMENT_DISPLAY = '0';
 
 static const char ENTER_SURVIVAL_MESSAGE[] = "Lightning Detected. Scheduled Telemetry is Temporarily Suspended.\n";
 static const char EXIT_SURVIVAL_MESSAGE[] = "Lightning Has Subsided. Scheduled Telemetry Will Now Resume.\n";
-
 
 /* ################# GLOBAL CONSTANTS ################# */
 // define available operation modes
 #define EXPLORER_MODE 0
 #define SURVIVAL_MODE 1
 
-//define lowest timeframe used to check in ms
-#define TIMEFRAME 50
-#define INTERUPTS_PER_SEC 20 //1000MS/50MS
-
+// map timed functions to timer number
+#define PCA9532 0
+#define RGB 1
+#define SAMPLING 2
 
 /* ################# GLOBAL VARIABLES ################# */
 static int OPERATION_MODE = EXPLORER_MODE; // default starting operation mode explorer
@@ -91,17 +88,42 @@ static int8_t z = 0;
 static uint16_t ledOn = 0xffff; // pca9532 led bit pattern
 
 // FIFO Array containing timestamp of last 9 lightning flashes
-// first element is oldest value, last element is newest
+// first element is newest value, last element is oldest
 static uint32_t recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
+static int recentFlashesStackPointer = -1; // no values stored yet
 
 // Timestamp checking beginning interrupt end interrupt of each lightning flash > LIGHTNING_THRESHOLD
 // Lightning flash only counted if flashEnd-flashBeginning<500ms
 static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
 
-static int reset_led_countdown = 0; // flag set to '1' if >3000 lux interrupt during survival mode
+/* ################# INTERRUPT HANDLER FLAGS ################### */
 
-/* ################# DEFINING AND WRAPPING OF TIMER ################### */
+static int RESET_LED_COUNTDOWN = 0; // flag set to '1' if >3000 lux interrupt during survival mode
+static int LIGHTNING_THRESHOLD_FLAG = 0; //flag is raised when LIGHTNIGN THRESHOLD is raised in interupts
+static int SW3_FLAG = 0;
+static int PCA9532_LED_COUNTDOWN_FLAG = 0;
+static int RGB_FLAG = 0;
+static int SAMPLING_FLAG = 0;
+static int UPDATE7SEG_FLAG = 0;
+
+/* ################# INTERRUPT PRIORITY SETTING ################### */
+
+void initPriority(void){
+
+
+	NVIC_EnableIRQ(EINT3_IRQn);
+
+	NVIC_SetPriority(SysTick_IRQn, 0);
+	NVIC_SetPriority(EINT3_IRQn, 1); // light sensor and SW3
+	// interrupt with smallest time interval is given higher priority
+	NVIC_SetPriority(TIMER0_IRQn, 2); // pca9532 led (250ms)
+	NVIC_SetPriority(TIMER1_IRQn, 3); // rgb (1s)
+	NVIC_SetPriority(TIMER2_IRQn, 4); // sampling (2s)
+}
+initPriority();
+
+/* ################# DEFINING AND SYSTICK ################### */
 
 volatile uint32_t msTicks;
 
@@ -116,7 +138,7 @@ uint32_t getMsTicks()
 
 /* ################# DEFINING SWITCHING ON AND OFF RGB ################### */
 
-void new_rgb_setLeds (uint8_t ledMask) // self defined function to blink RGB
+void new_rgb_setLeds (uint8_t ledMask) // self defined function to blink RGB depending on OPERATION_MODE
 {
 	// turn on RGB_RED only if off, else turn off RGB_RED
     if ((ledMask & RGB_RED) != 0 && (GPIO_ReadValue(2) & 0x01) == 0) {
@@ -285,7 +307,6 @@ static void init_ssp(void)
 
 	// Enable SSP peripheral
 	SSP_Cmd(LPC_SSP1, ENABLE);
-
 }
 
 static void init_i2c(void)
@@ -320,8 +341,12 @@ static void init_GPIO(void)
 	PINSEL_ConfigPin(&PinCfg);
 
 	GPIO_SetDir(1, 1<<31, 0);
-}
 
+	// init rgb to output
+    GPIO_SetDir( 2, 1, 1 );
+    GPIO_SetDir( 0, (1<<26), 1 );
+    GPIO_SetDir( 2, (1<<1), 1 );
+}
 
 /* ################# INITIALIZING PERIPHERALS ################### */
 
@@ -353,14 +378,60 @@ static int32_t * readAccelerometer(void) {
 }
 
 void rgbBlinky (void) {
-	uint32_t rgbColor;
 	if (OPERATION_MODE == EXPLORER_MODE) {
-		rgbColor = INDICATOR_EXPLORER; // blue
-		new_rgb_setLeds(rgbColor);
+		new_rgb_setLeds(INDICATOR_EXPLORER); // blue
 	} else {
-		rgbColor = INDICATOR_SURVIVAL; // red
-		new_rgb_setLeds(rgbColor);
+		new_rgb_setLeds(INDICATOR_SURVIVAL); // red
 	}
+}
+
+/* ################# INITIALIZING TIMER ################### */
+
+// timerNumber is in range 0-2
+static void enableTimer(int timerNumber, uint32_t time) {
+	TIM_TIMERCFG_Type TIM_ConfigStruct;
+	TIM_MATCHCFG_Type TIM_MatchConfigStruct ;
+
+	// Initialize timer 0, prescale count time of 1ms
+	TIM_ConfigStruct.PrescaleOption = TIM_PRESCALE_USVAL;
+	TIM_ConfigStruct.PrescaleValue	= 1000;
+	// use channel 0, MR0
+	TIM_MatchConfigStruct.MatchChannel = 0;
+	// Enable interrupt when MR0 matches the value in TC register
+	TIM_MatchConfigStruct.IntOnMatch   = TRUE;
+	//Enable reset on MR0: TIMER will reset if interrupt triggered
+	TIM_MatchConfigStruct.ResetOnMatch = TRUE;
+	//Continue running after interrupt has occurred
+	TIM_MatchConfigStruct.StopOnMatch = FALSE;
+	//do no thing for external output
+	TIM_MatchConfigStruct.ExtMatchOutputType = TIM_EXTMATCH_NOTHING;
+	// Set Match value, count value is time (timer * 1000uS =timer mS )
+	TIM_MatchConfigStruct.MatchValue = time;
+
+	LPC_TIM_TypeDef *TIMx; // select Timer0, Timer1 or Timer2
+	if (timerNumber == 0) {
+		TIMx = LPC_TIM0;
+	} else if (timerNumber == 1) {
+		TIMx = LPC_TIM1;
+	} else if (timerNumber == 2) {
+		TIMx = LPC_TIM2;
+	}
+
+	// Set configuration for Tim_config and Tim_MatchConfig
+	TIM_Init(TIMx,TIM_TIMER_MODE,&TIM_ConfigStruct);
+	TIM_ConfigMatch(TIMx,&TIM_MatchConfigStruct);
+}
+
+static void disableTimer(int timerNumber) {
+	LPC_TIM_TypeDef *TIMx;
+	if (timerNumber == 0) {
+		TIMx = LPC_TIM0;
+	} else if (timerNumber == 1) {
+		TIMx = LPC_TIM1;
+	} else if (timerNumber == 2) {
+		TIMx = LPC_TIM2;
+	}
+	TIM_DeInit(TIMx);
 }
 
 /* ################# INITIALIZING HOPE ################### */
@@ -379,13 +450,27 @@ static void initializeHOPE(void) {
 	led7seg_setChar(NULL, FALSE); // clear 7 segment display
 }
 
-
 /* ################# INITIALIZING INTERUPTS ################### */
+
+void TIMER0_IRQHandler(void){
+	PCA9532_LED_COUNTDOWN_FLAG = 1;
+	TIM_ClearIntPending(LPC_TIM0,0);
+}
+
+void TIMER1_IRQHandler(void){
+	RGB_FLAG = 1;
+	TIM_ClearIntPending(LPC_TIM1,0);
+}
+
+void TIMER2_IRQHandler(void){
+	SAMPLING_FLAG = 1;
+	TIM_ClearIntPending(LPC_TIM2,0);
+}
 
 void EINT3_IRQHandler(void) {
 	if ((LPC_GPIOINT->IO2IntStatF >> 5) & 0x1) { // light sensor >3000 lux interrupt
 		flashBeginning = getMsTicks();
-		reset_led_countdown = 1;
+		RESET_LED_COUNTDOWN = 1;
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
 	}
@@ -394,44 +479,26 @@ void EINT3_IRQHandler(void) {
 		flashEnd = getMsTicks();
 		if (flashEnd - flashBeginning < 500) {
 			LIGHTNING_THRESHOLD_FLAG = 1;
+			UPDATE7SEG_FLAG = 1; // genericTasks() will increment 7 segment display
+			SEGMENT_DISPLAY += 1;
 		}
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
 	}
 
 	if ((LPC_GPIOINT->IO2IntStatF >> 10) & 0x1) { // SW3 interrupt
+		SW3_FLAG = 1;
 		LPC_GPIOINT->IO2IntClr = (1<<10);
 	}
 }
-
-/* ################# COUNTERS FOR TASKS ################### */
-static const int RGB_COUNTER_LIMIT = (1000+TIMEFRAME-1)/TIMEFRAME; // to obtain ceiling of division of 1000ms by TIMEFRAME
-static int rgb_Counter = RGB_COUNTER_LIMIT; // in order to run first execution
-static const int SAMPLING_COUNTER_LIMIT = (SAMPLING_TIME+TIMEFRAME-1)/TIMEFRAME;
-static int sampling_Counter = SAMPLING_COUNTER_LIMIT;
-static const int LED_COUNTER_LIMIT = (TIME_UNIT+TIMEFRAME-1)/TIMEFRAME;
-static int led_Counter = LED_COUNTER_LIMIT;
-
-static int LIGHTNING_THRESHOLD_FLAG = 0; //flag is raised when LIGHTNIGN THRESHOLD is raised in interupts
-
 
 static char Array[20]; //array to write
 
 /* ################# TASK HANDLERS ################### */
 
 static void explorerTasks(void){
-
-	//checking if in past LIGHTNING_TIME_WINDOW lightning threshold exceeded 3 times
-	if(recentFlashes[6]!=0 && recentFlashes[7]!=0 && recentFlashes[8]!=0
-			&& (recentFlashes[6]-recentFlashes[8]<=LIGHTNING_TIME_WINDOW)){
-		OPERATION_MODE = SURVIVAL_MODE;
-		return; //exit explorer tasks
-	}
-
-	sampling_Counter++;
-
-	if(sampling_Counter==SAMPLING_COUNTER_LIMIT){
-		sampling_Counter=0; //reset counter
+	if (SAMPLING_FLAG == 1) {
+		SAMPLING_FLAG = 0;
 		int32_t light_value = readLightSensor();
 		int32_t temp_value = readTempSensor();
 		int32_t *xyz_values;
@@ -441,8 +508,6 @@ static void explorerTasks(void){
 		oled_putString(0,20,(uint8_t*)Array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 		// TRANSMIT DATA TO HOME
 	}
-	//print values not working!
-	//printValues(light_value,temp_value,*xyz_values);
 }
 
 /*
@@ -460,20 +525,20 @@ void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 }*/
 
 static void survivalTasks(void) {
-	led_Counter++;
-	if (led_Counter == LED_COUNTER_LIMIT) {
+	if (RESET_LED_COUNTDOWN == 0) {
+		if (PCA9532_LED_COUNTDOWN_FLAG == 1) {
+			ledOn = ledOn >> 1;
+		} else {
+			RESET_LED_COUNTDOWN = 0;
+			ledOn = 0xffff
+		}
 	    pca9532_setLeds(ledOn, 0xffff);
-	    if (reset_led_countdown == 0) {
-	    	ledOn = ledOn >> 1; // MSB = 0 -> turn off one LED
-	    } else { // lightning interrupt occurred, restart sequence
-	    	ledOn = 0xffff;
-	    	reset_led_countdown = 0;
-	    }
+
 	    if (ledOn == 0) { // no lightning in past 4s
-	    	pca9532_setLeds(0x0000, 0xffff);
 	    	OPERATION_MODE = EXPLORER_MODE;
+	    	enableTimer(SAMPLING, 2000);
+	    	disableTimer(PCA9532);
 	    }
-	    led_Counter = 0; // reset and wait for next cycle
 	}
 }
 
@@ -482,30 +547,46 @@ static void genericTasks(void){
 	//DOES NOT WORK, ASSUMES LIGHTNING THRESHOLD CAN ONLY BE RAISED ONCE EVERY 50MS
 	//NEED TO CHANGE TO A DIFFERENT IMPLEMENTATION! (STORE LIGHTNING THRESHOLD IN ARRAY,
 	//COUNT DOWN LIGHTNING THRESHOLD FLAG?
-	if(LIGHTNING_THRESHOLD_FLAG==1){
+	if(LIGHTNING_THRESHOLD_FLAG == 1){
+		LIGHTNING_THRESHOLD_FLAG=0; //RESET LIGHTNING THRESHOLD FLAG
 		uint32_t tempArray[9];
 		memcpy(tempArray, recentFlashes, 9); // copy values into tempArray
 		int i=0;
 		while (i<8) {
-			recentFlashes[i] = tempArray[i+1];
+			recentFlashes[i+1] = tempArray[i];
 			i++;
 		}
-		recentFlashes[8] = flashEnd; // push new value in
-		LIGHTNING_THRESHOLD_FLAG=0; //RESET LIGHTNING THRESHOLD FLAG
+		recentFlashes[0] = flashEnd; // push new value in
+		recentFlashesStackPointer++;
 	}
 
-	//count lightning threshold up till 9
+	//check if count of lightning flashes is correct
+	CURRENT_TIME = getMsTicks();
+	if (CURRENT_TIME > recentFlashes[recentFlashesStackPointer] + 3000) {
+		recentFlashesStackPointer--;
+		SEGMENT_DISPLAY -= 1;
+		UPDATE7SEG_FLAG = 1;
+	}
+
+	if (UPDATE7SEG_FLAG == 1) {
+		UPDATE7SEG_FLAG = 0;
+		led7seg_setChar(SEGMENT_DISPLAY, FALSE);
+	}
+
+	if (recentFlashesStackPointer >= 3) {
+		OPERATION_MODE = SURVIVAL_MODE;
+    	enableTimer(PCA9532, 250);
+    	disableTimer(SAMPLING);
+	}
 
 	//make rbg blink according to survivor or explorer mode
-	rgb_Counter++;
-	if (rgb_Counter == RGB_COUNTER_LIMIT) {
+	if (RGB_FLAG == 1) {
+		RGB_FLAG = 0;
 		rgbBlinky();
-		rgb_Counter = 0;
 	}
-
-
-
-
+	if (SW3_FLAG == 1) {
+		SW3_FLAG = 0;
+	}
 }
 
 int main (void) {
@@ -543,7 +624,7 @@ int main (void) {
     acc_read(&x, &y, &z);
     xoff = 0-x;
     yoff = 0-y;
-    zoff = 64-z; // saving initial value of z axis of accelerometer
+    zoff = 0-z;
 
     /* ---- Speaker ------> */
 
@@ -563,23 +644,10 @@ int main (void) {
     oled_clearScreen(OLED_COLOR_BLACK);
 
 	initializeHOPE();
-
-	INITIAL_TIME = getMsTicks();
-	CURRENT_TIME = getMsTicks();
+	enableTimer(RGB, 1000); // RGB will blink throughout operation
 
     while (1)
     {
-    	//checking for the condition that the below execution exceeds our TIMEFRAME
-    	if(CURRENT_TIME - INITIAL_TIME > TIMEFRAME){
-    		while(1); //throw error, get stuck in this loop
-    	}
-
-    	//delay until the next TIMEFRAME INTERUPT
-    	while (CURRENT_TIME - INITIAL_TIME < TIMEFRAME) { // 50MS INTERVAL
-    		CURRENT_TIME = getMsTicks();
-    	}
-    	INITIAL_TIME = CURRENT_TIME;
-
     	genericTasks();
     	if(OPERATION_MODE == EXPLORER_MODE){
     		explorerTasks();
