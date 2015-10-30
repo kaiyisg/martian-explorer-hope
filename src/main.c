@@ -111,17 +111,31 @@ static int UPDATE7SEG_FLAG = 0;
 
 void initPriority(void){
 
+	uint32_t priority, PG = 5, PP, SP; // priority grouping, pre-empt priority, subpriority
+	NVIC_SetPriorityGrouping(5);
+
+	PP = 0, SP = 0;
+	priority = NVIC_EncodePriority(PG,PP,SP);
+	NVIC_SetPriority(SysTick_IRQn, priority);
+	PP = 1, SP = 0;
+	priority = NVIC_EncodePriority(PG,PP,SP);
+	NVIC_SetPriority(EINT3_IRQn, priority); // light sensor and SW3
+	// interrupt with smallest time interval is given higher priority
+	PP = 2, SP = 0;
+	priority = NVIC_EncodePriority(PG,PP,SP);
+	NVIC_SetPriority(TIMER0_IRQn, priority); // pca9532 led (250ms)
+	PP = 2, SP = 1;
+	priority = NVIC_EncodePriority(PG,PP,SP);
+	NVIC_SetPriority(TIMER1_IRQn, priority); // rgb (1s)
+	PP = 2, SP = 2;
+	priority = NVIC_EncodePriority(PG,PP,SP);
+	NVIC_SetPriority(TIMER2_IRQn, priority); // sampling (2s)
 
 	NVIC_EnableIRQ(EINT3_IRQn);
-
-	NVIC_SetPriority(SysTick_IRQn, 0);
-	NVIC_SetPriority(EINT3_IRQn, 1); // light sensor and SW3
-	// interrupt with smallest time interval is given higher priority
-	NVIC_SetPriority(TIMER0_IRQn, 2); // pca9532 led (250ms)
-	NVIC_SetPriority(TIMER1_IRQn, 3); // rgb (1s)
-	NVIC_SetPriority(TIMER2_IRQn, 4); // sampling (2s)
+	NVIC_EnableIRQ(TIMER0_IRQn);
+	NVIC_EnableIRQ(TIMER1_IRQn);
+	NVIC_EnableIRQ(TIMER2_IRQn);
 }
-initPriority();
 
 /* ################# DEFINING AND SYSTICK ################### */
 
@@ -530,7 +544,7 @@ static void survivalTasks(void) {
 			ledOn = ledOn >> 1;
 		} else {
 			RESET_LED_COUNTDOWN = 0;
-			ledOn = 0xffff
+			ledOn = 0xffff;
 		}
 	    pca9532_setLeds(ledOn, 0xffff);
 
@@ -594,6 +608,7 @@ int main (void) {
     init_i2c();
     init_ssp();
     init_GPIO();
+    initPriority();
 
     pca9532_init();
     joystick_init();
