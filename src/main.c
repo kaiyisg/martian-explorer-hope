@@ -75,7 +75,7 @@ static const char EXIT_SURVIVAL_MESSAGE[] = "Lightning Has Subsided. Scheduled T
 #define SAMPLING 3
 
 /* ################# GLOBAL VARIABLES ################# */
-static int OPERATION_MODE = EXPLORER_MODE; // default starting operation mode explorer
+static int OPERATION_MODE = SURVIVAL_MODE; // default starting operation mode explorer
 
 /* Accelerometer Variables */
 static int32_t xoff = 0;
@@ -87,6 +87,7 @@ static int8_t y = 0;
 static int8_t z = 0;
 
 static uint16_t ledOn = 0xffff; // pca9532 led bit pattern
+static int RGB_ON = 0;
 
 // FIFO Array containing timestamp of last 9 lightning flashes
 // first element is newest value, last element is oldest
@@ -157,23 +158,19 @@ uint32_t getMsTicks()
 }
 
 /* ################# DEFINING SWITCHING ON AND OFF RGB ################### */
-static int counter = 0;
+
 void new_rgb_setLeds (uint8_t ledMask) // self defined function to blink RGB depending on OPERATION_MODE
 {
-	// turn on RGB_RED only if off, else turn off RGB_RED
-	if ((ledMask & RGB_RED) != 0 && (GPIO_ReadValue(2)>>1 & 0x01) == 0) {
-		GPIO_SetValue( 2, 1); // write a 1 instead of 0
-	} else {
+	if (RGB_ON == 1) {
 		GPIO_ClearValue( 2, 1);
-		printf("%d\n", counter);
-		counter++;
-		fflush(stdout);
-	}
-	// turn on RGB_BLUE only if off, else turn off RGB_BLUE
-	if ((ledMask & RGB_BLUE) != 0 && (GPIO_ReadValue(0)>>26 & 0x01) == 0) {
-		GPIO_SetValue( 0, (1<<26) );
-	} else {
 		GPIO_ClearValue( 0, (1<<26) );
+	} else {
+		if ((ledMask & RGB_RED) != 0) {
+			GPIO_SetValue( 2, 1); // write a 1 instead of
+		}
+		if ((ledMask & RGB_BLUE) != 0) {
+			GPIO_SetValue( 0, (1<<26) );
+		}
 	}
 }
 
@@ -418,7 +415,7 @@ void init_Speaker(void) {
 
 /* ################# INITIALIZING TIMER ################### */
 
-// timerNumber is in range 0-2
+// timerNumber is in range 1-3
 static void enableTimer(int timerNumber, uint32_t time) {
 	TIM_TIMERCFG_Type TIM_ConfigStruct;
 	TIM_MATCHCFG_Type TIM_MatchConfigStruct ;
@@ -493,6 +490,12 @@ void TIMER1_IRQHandler(void){
 }
 
 void TIMER2_IRQHandler(void){
+	// toggle on-off
+	if (RGB_ON == 0) {
+		RGB_ON = 1;
+	} else {
+		RGB_ON = 0;
+	}
 	rgbBlinky();
 	TIM_ClearIntPending(LPC_TIM2,0);
 }
@@ -577,7 +580,7 @@ void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 }
 
 static void survivalTasks(void) {
-	enableTimer(RGB, 1000);
+
 	if (RESET_LED_COUNTDOWN == 0) {
 		if (PCA9532_LED_COUNTDOWN_FLAG == 1) {
 			PCA9532_LED_COUNTDOWN_FLAG = 0;
@@ -592,8 +595,6 @@ static void survivalTasks(void) {
 
 	if (ledOn == 0) { // no lightning in past 4s
 		OPERATION_MODE = EXPLORER_MODE;
-    	enableTimer(SAMPLING, 2000);
-		disableTimer(PCA9532);
 	}
 }
 
@@ -631,10 +632,6 @@ static void genericTasks(void){
 	if ((recentFlashesStackPointer >= 3) && (OPERATION_MODE == EXPLORER_MODE)) {
 		OPERATION_MODE = SURVIVAL_MODE;
         oled_clearScreen(OLED_COLOR_BLACK);
-    	disableTimer(SAMPLING);
-    	disableTimer(RGB);
-    	enableTimer(PCA9532, 250);
-    	enableTimer(RGB, 1000);
 	}
 	if (SW3_FLAG == 1) {
 		SW3_FLAG = 0;
@@ -674,6 +671,7 @@ int main (void) {
     init_Interrupts();
 	enableTimer(RGB, 1000); // RGB will blink throughout operation
 	enableTimer(SAMPLING, 2000); //enable sampling timer when first going into loop
+	enableTimer(PCA9532, 250);
 
     while (1)
     {
