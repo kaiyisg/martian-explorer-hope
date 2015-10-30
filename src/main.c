@@ -97,6 +97,7 @@ static int recentFlashesStackPointer = -1; // no values stored yet
 // Lightning flash only counted if flashEnd-flashBeginning<500ms
 static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
+static int aboveThreshold = 0;
 
 /* ################# INTERRUPT HANDLER FLAGS ################### */
 
@@ -127,9 +128,14 @@ void init_Priority(void){
 	PP = 2, SP = 1;
 	priority = NVIC_EncodePriority(PG,PP,SP);
 	NVIC_SetPriority(TIMER2_IRQn, priority); // rgb (1s)
-	PP = 3, SP = 2;
+	PP = 2, SP = 2;
 	priority = NVIC_EncodePriority(PG,PP,SP);
 	NVIC_SetPriority(TIMER3_IRQn, priority); // sampling (2s)
+
+	NVIC_ClearPendingIRQ(EINT3_IRQn);
+	NVIC_ClearPendingIRQ(TIMER1_IRQn);
+	NVIC_ClearPendingIRQ(TIMER2_IRQn);
+	NVIC_ClearPendingIRQ(TIMER3_IRQn);
 
 	NVIC_EnableIRQ(EINT3_IRQn);
 	NVIC_EnableIRQ(TIMER1_IRQn);
@@ -151,7 +157,7 @@ uint32_t getMsTicks()
 }
 
 /* ################# DEFINING SWITCHING ON AND OFF RGB ################### */
-
+static int counter = 0;
 void new_rgb_setLeds (uint8_t ledMask) // self defined function to blink RGB depending on OPERATION_MODE
 {
 	// turn on RGB_RED only if off, else turn off RGB_RED
@@ -159,9 +165,12 @@ void new_rgb_setLeds (uint8_t ledMask) // self defined function to blink RGB dep
 		GPIO_SetValue( 2, 1); // write a 1 instead of 0
 	} else {
 		GPIO_ClearValue( 2, 1);
+		printf("%d\n", counter);
+		counter++;
+		fflush(stdout);
 	}
 	// turn on RGB_BLUE only if off, else turn off RGB_BLUE
-	if ((ledMask & RGB_BLUE) != 0 && (GPIO_ReadValue(1)>>26 & 0x01) == 0) {
+	if ((ledMask & RGB_BLUE) != 0 && (GPIO_ReadValue(0)>>26 & 0x01) == 0) {
 		GPIO_SetValue( 0, (1<<26) );
 	} else {
 		GPIO_ClearValue( 0, (1<<26) );
@@ -393,6 +402,20 @@ void rgbBlinky (void) {
 	}
 }
 
+void init_Speaker(void) {
+    GPIO_SetDir(2, 1<<0, 1);
+    GPIO_SetDir(2, 1<<1, 1);
+
+    GPIO_SetDir(0, 1<<27, 1);
+    GPIO_SetDir(0, 1<<28, 1);
+    GPIO_SetDir(2, 1<<13, 1);
+    GPIO_SetDir(0, 1<<26, 1);
+
+    GPIO_ClearValue(0, 1<<27); //LM4811-clk
+    GPIO_ClearValue(0, 1<<28); //LM4811-up/dn
+    GPIO_ClearValue(2, 1<<13); //LM4811-shutdn
+}
+
 /* ################# INITIALIZING TIMER ################### */
 
 // timerNumber is in range 0-2
@@ -457,6 +480,9 @@ static void initializeHOPE(void) {
 		}
 	}
 	led7seg_setChar(NULL, FALSE); // clear 7 segment display
+	if(readLightSensor() > LIGHTNING_THRESHOLD) {
+		aboveThreshold = 1;
+	}
 }
 
 /* ################# INITIALIZING INTERUPTS ################### */
@@ -467,14 +493,7 @@ void TIMER1_IRQHandler(void){
 }
 
 void TIMER2_IRQHandler(void){
-
 	rgbBlinky();
-//	RGB_FLAG = 1;
-	if (RGB_ON == 1) {
-		RGB_ON = 0;
-	} else {
-		RGB_ON = 1;
-	}
 	TIM_ClearIntPending(LPC_TIM2,0);
 }
 
@@ -484,19 +503,27 @@ void TIMER3_IRQHandler(void){
 }
 
 void EINT3_IRQHandler(void) {
-	if ((LPC_GPIOINT->IO2IntStatF >> 5) & 0x1) { // light sensor >3000 lux interrupt
-		flashBeginning = getMsTicks();
-		RESET_LED_COUNTDOWN = 1;
-		LPC_GPIOINT->IO2IntClr = (1<<5);
-		light_clearIrqStatus();
-	}
-
-	if ((LPC_GPIOINT->IO2IntStatR >> 5) &0x1) { // light sensor <3000 lux interrupt
-		flashEnd = getMsTicks();
-		if (flashEnd - flashBeginning < 500) {
-			LIGHTNING_THRESHOLD_FLAG = 1;
-			UPDATE7SEG_FLAG = 1; // genericTasks() will increment 7 segment display
-			SEGMENT_DISPLAY += 1;
+	if ((LPC_GPIOINT->IO2IntStatF >> 5) & 0x1) { // light sensor cross 3000 lux threshold interrupt
+		if (aboveThreshold) {
+			flashEnd = getMsTicks();
+			if (flashEnd - flashBeginning < 500) {
+				LIGHTNING_THRESHOLD_FLAG = 1;
+				UPDATE7SEG_FLAG = 1; // genericTasks() will increment 7 segment display
+				if (SEGMENT_DISPLAY != '9') { // limit 7 segment display to '9'
+					SEGMENT_DISPLAY += 1;
+				}
+			}
+			aboveThreshold = 0;
+		   // uint16_t a=flashEnd;
+		   // printf("flash End: %" PRIu32 "\n",a);
+		} else {
+			flashBeginning = getMsTicks();
+			if (OPERATION_MODE == SURVIVAL_MODE) {
+				RESET_LED_COUNTDOWN = 1;
+			}
+			aboveThreshold = 1;
+		    //uint16_t a=flashBeginning;
+		    //printf("flash begin: %" PRIu32 "\n",a);
 		}
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
@@ -506,6 +533,18 @@ void EINT3_IRQHandler(void) {
 		SW3_FLAG = 1;
 		LPC_GPIOINT->IO2IntClr = (1<<10);
 	}
+}
+
+void init_Interrupts(void) {
+    // Setup Interrupt for Light Sensor
+    light_enable();
+    light_setRange(LIGHT_RANGE_4000); // sensing up to 3892 lux
+    light_setHiThreshold(LIGHTNING_THRESHOLD); // condition for interrupt
+    light_setIrqInCycles(LIGHT_CYCLE_1);
+    light_clearIrqStatus();
+
+    LPC_GPIOINT->IO2IntEnF |= 1 << 5; // light sensor 3000 lux interrupt (P2.5)
+    LPC_GPIOINT->IO2IntEnF |= 1 << 10; // SW3 (P2.10)
 }
 
 static char Array[20]; //array to write
@@ -519,14 +558,11 @@ static void explorerTasks(void){
 		int32_t temp_value = readTempSensor();
 		int32_t *xyz_values;
 		xyz_values = readAccelerometer();
-		sprintf(Array, "L%d_T%d_AX%d_AY%d_AZ%d\n", light_value, temp_value,
-						*(xyz_values), *(xyz_values+1), *(xyz_values+2));
-		oled_putString(0,20,(uint8_t*)Array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		printValues(light_value, temp_value, xyz_values);
 		// TRANSMIT DATA TO HOME
 	}
 }
 
-/*
 //function to print values to oled screen, in 3 different lines
 void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 	char lightArray[20];
@@ -534,27 +570,30 @@ void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 	char xyzArray[20];
 	sprintf(lightArray, "L%d", light_value);
 	sprintf(tempArray, "T%d", temp_value);
-	sprintf(xyzArray, "AX%d_AY%d_AZ%d", *(xyz_values), *(xyz_values+1), *(xyz_values+2));
+	sprintf(xyzArray, "AX%d_AY%d_AZ%d", (int) *(xyz_values), (int) *(xyz_values+1),(int) *(xyz_values+2));
 	oled_putString(0,0,(uint8_t*)lightArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,20,(uint8_t*)tempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,40,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-}*/
+}
 
 static void survivalTasks(void) {
+	enableTimer(RGB, 1000);
 	if (RESET_LED_COUNTDOWN == 0) {
 		if (PCA9532_LED_COUNTDOWN_FLAG == 1) {
+			PCA9532_LED_COUNTDOWN_FLAG = 0;
 			ledOn = ledOn >> 1;
-		} else {
-			RESET_LED_COUNTDOWN = 0;
-			ledOn = 0xffff;
 		}
-	    pca9532_setLeds(ledOn, 0xffff);
+	} else {
+		RESET_LED_COUNTDOWN = 0;
+		ledOn = 0xffff;
+	}
 
-	    if (ledOn == 0) { // no lightning in past 4s
-	    	OPERATION_MODE = EXPLORER_MODE;
-	    	enableTimer(SAMPLING, 2000);
-	    	disableTimer(PCA9532);
-	    }
+	pca9532_setLeds(ledOn, 0xffff);
+
+	if (ledOn == 0) { // no lightning in past 4s
+		OPERATION_MODE = EXPLORER_MODE;
+    	enableTimer(SAMPLING, 2000);
+		disableTimer(PCA9532);
 	}
 }
 
@@ -565,12 +604,10 @@ static void genericTasks(void){
 	//COUNT DOWN LIGHTNING THRESHOLD FLAG?
 	if(LIGHTNING_THRESHOLD_FLAG == 1){
 		LIGHTNING_THRESHOLD_FLAG=0; //RESET LIGHTNING THRESHOLD FLAG
-		uint32_t tempArray[9];
-		memcpy(tempArray, recentFlashes, 9); // copy values into tempArray
-		int i=0;
-		while (i<8) {
-			recentFlashes[i+1] = tempArray[i];
-			i++;
+		int i=7;
+		while(i>=0){
+			recentFlashes[i+1]=recentFlashes[i];
+			i--;
 		}
 		recentFlashes[0] = flashEnd; // push new value in
 		recentFlashesStackPointer++;
@@ -580,7 +617,9 @@ static void genericTasks(void){
 	CURRENT_TIME = getMsTicks();
 	if (CURRENT_TIME > recentFlashes[recentFlashesStackPointer] + 3000) {
 		recentFlashesStackPointer--;
-		SEGMENT_DISPLAY -= 1;
+		if (SEGMENT_DISPLAY != '0') { // minimum display '0'
+			SEGMENT_DISPLAY -= 1;
+		}
 		UPDATE7SEG_FLAG = 1;
 	}
 
@@ -589,12 +628,14 @@ static void genericTasks(void){
 		led7seg_setChar(SEGMENT_DISPLAY, FALSE);
 	}
 
-	if (recentFlashesStackPointer >= 3) {
+	if ((recentFlashesStackPointer >= 3) && (OPERATION_MODE == EXPLORER_MODE)) {
 		OPERATION_MODE = SURVIVAL_MODE;
-    	enableTimer(PCA9532, 250);
+        oled_clearScreen(OLED_COLOR_BLACK);
     	disableTimer(SAMPLING);
+    	disableTimer(RGB);
+    	enableTimer(PCA9532, 250);
+    	enableTimer(RGB, 1000);
 	}
-
 	if (SW3_FLAG == 1) {
 		SW3_FLAG = 0;
 	}
@@ -614,17 +655,6 @@ int main (void) {
 	led7seg_init();
     temp_init(&getMsTicks);
 
-    // Setup Interrupt for Light Sensor
-    light_enable();
-    light_setRange(LIGHT_RANGE_4000); // sensing up to 3892 lux
-    light_setHiThreshold(LIGHTNING_THRESHOLD); // condition for interrupt
-    light_setIrqInCycles(LIGHT_CYCLE_1);
-    light_clearIrqStatus();
-
-    LPC_GPIOINT->IO2IntEnF |= 1 << 5; // light sensor >3000 lux interrupt (P2.5)
-    LPC_GPIOINT->IO2IntEnR |= 1 << 5; // light sensor <3000 lux interrupt (P2.5)
-    LPC_GPIOINT->IO2IntEnF |= 1 << 10; // SW3 (P2.10)
-
     if(SysTick_Config(SystemCoreClock/1000)){
     	while(1); //capture error
     }
@@ -633,28 +663,15 @@ int main (void) {
      * Assume base board in zero-g position when reading first value.
      */
     acc_read(&x, &y, &z);
-    xoff = 0-x;
-    yoff = 0-y;
+    xoff = 0;
+    yoff = 0;
     zoff = 0-z;
-
-    /* ---- Speaker ------> */
-
-    GPIO_SetDir(2, 1<<0, 1);
-    GPIO_SetDir(2, 1<<1, 1);
-
-    GPIO_SetDir(0, 1<<27, 1);
-    GPIO_SetDir(0, 1<<28, 1);
-    GPIO_SetDir(2, 1<<13, 1);
-    GPIO_SetDir(0, 1<<26, 1);
-
-    GPIO_ClearValue(0, 1<<27); //LM4811-clk
-    GPIO_ClearValue(0, 1<<28); //LM4811-up/dn
-    GPIO_ClearValue(2, 1<<13); //LM4811-shutdn
 
     // Initialize OLED
     oled_clearScreen(OLED_COLOR_BLACK);
 
 	//initializeHOPE();
+    init_Interrupts();
 	enableTimer(RGB, 1000); // RGB will blink throughout operation
 	enableTimer(SAMPLING, 2000); //enable sampling timer when first going into loop
 
