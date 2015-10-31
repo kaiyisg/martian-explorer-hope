@@ -4,13 +4,8 @@
  *   Daryl Yong & Lee Kai Yi, EE2024 Lab B3
  *
  ******************************************************************************/
-//normal to-dos
-//CAN YOU INTERRUPT BASED ON MSTICKS FOR RGB BLINKY?
-//EXPLAIN THRESHOLD TO ENTER SURVIVAL MODE
 
-//rising edge for detection of light sensor < 3000lux
-//write light_read in a better way
-//queue system for counting lightning
+
 //sw1 that allows the baseboard to reinitialize tilt value
 
 //assignment hints:
@@ -75,7 +70,7 @@ static const char EXIT_SURVIVAL_MESSAGE[] = "Lightning Has Subsided. Scheduled T
 #define SAMPLING 3
 
 /* ################# GLOBAL VARIABLES ################# */
-static int OPERATION_MODE = SURVIVAL_MODE; // default starting operation mode explorer
+static int OPERATION_MODE = EXPLORER_MODE; // default starting operation mode explorer
 
 /* Accelerometer Variables */
 static int32_t xoff = 0;
@@ -571,9 +566,12 @@ void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 	char lightArray[20];
 	char tempArray[20];
 	char xyzArray[20];
-	sprintf(lightArray, "L%d", light_value);
-	sprintf(tempArray, "T%d", temp_value);
+	sprintf(lightArray, "L%d", (int)light_value);
+	sprintf(tempArray, "T%d", (int)temp_value);
 	sprintf(xyzArray, "AX%d_AY%d_AZ%d", (int) *(xyz_values), (int) *(xyz_values+1),(int) *(xyz_values+2));
+	printf("L%d\n", (int)light_value);
+	fflush(stdin);
+	fflush(stdout);
 	oled_putString(0,0,(uint8_t*)lightArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,20,(uint8_t*)tempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,40,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
@@ -616,7 +614,8 @@ static void genericTasks(void){
 
 	//check if count of lightning flashes is correct
 	CURRENT_TIME = getMsTicks();
-	if (CURRENT_TIME > recentFlashes[recentFlashesStackPointer] + 3000) {
+	if ((CURRENT_TIME > recentFlashes[recentFlashesStackPointer] + 3000) &&
+			recentFlashesStackPointer>=0){
 		recentFlashesStackPointer--;
 		if (SEGMENT_DISPLAY != '0') { // minimum display '0'
 			SEGMENT_DISPLAY -= 1;
@@ -673,6 +672,7 @@ int main (void) {
 	enableTimer(SAMPLING, 2000); //enable sampling timer when first going into loop
 	enableTimer(PCA9532, 250);
 
+	//SEGMENT_DISPLAY = 0;
     while (1)
     {
     	genericTasks();
