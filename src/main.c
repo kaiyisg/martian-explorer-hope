@@ -87,9 +87,9 @@ static int RGB_ON = 0;
 // FIFO Array containing timestamp of last 9 lightning flashes
 // first element is newest value, last element is oldest
 static uint32_t recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
-static int recentFlashesStackPointer = -1; // no values stored yet
+static int recentFlashesStackPointer = -1; // keeps track of how many flashes in past LIGHTNING_TIME_WINDOW
 
-// Timestamp checking beginning interrupt end interrupt of each lightning flash > LIGHTNING_THRESHOLD
+// Timestamp checking beginning and end interrupt of each lightning flash > LIGHTNING_THRESHOLD
 // Lightning flash only counted if flashEnd-flashBeginning<500ms
 static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
@@ -98,7 +98,6 @@ static int aboveThreshold = 0;
 /* ################# INTERRUPT HANDLER FLAGS ################### */
 
 static int RESET_LED_COUNTDOWN = 0; // flag set to '1' if >3000 lux interrupt during survival mode
-static int LIGHTNING_THRESHOLD_FLAG = 0; //flag is raised when LIGHTNIGN THRESHOLD is raised in interupts
 static int SW3_FLAG = 0;
 static int PCA9532_LED_COUNTDOWN_FLAG = 0;
 static int SAMPLING_FLAG = 0;
@@ -357,6 +356,29 @@ static void init_GPIO(void)
     GPIO_SetDir( 2, (1<<1), 1 );
 }
 
+void pinsel_uart3(void) {
+	PINSEL_CFG_Type PinCfg;
+	PinCfg.Funcnum = 2;
+	PinCfg.Pinnum = 0;
+	PinCfg.Portnum = 0;
+	PINSEL_ConfigPin(&PinCfg);
+	PinCfg.Pinnum = 1;
+	PINSEL_ConfigPin(&PinCfg);
+}
+
+void init_uart(void){
+	UART_CFG_Type uartCfg;
+	uartCfg.Baud_rate = 115200;
+	uartCfg.Databits = UART_DATABIT_8;
+	uartCfg.Parity =UART_PARITY_NONE;
+	uartCfg.Stopbits = UART_STOPBIT_1;
+
+	pinsel_uart3();
+
+	UART_Init(LPC_UART3, &uartCfg);
+	UART_TxCmd(LPC_UART3,ENABLE);
+}
+
 /* ################# INITIALIZING PERIPHERALS ################### */
 
 static int32_t readTempSensor(void) {
@@ -505,7 +527,15 @@ void EINT3_IRQHandler(void) {
 		if (aboveThreshold) {
 			flashEnd = getMsTicks();
 			if (flashEnd - flashBeginning < 500) {
-				LIGHTNING_THRESHOLD_FLAG = 1;
+				// Push new value of flashEnd into recentFlashes
+				int i=7;
+				while(i>=0){
+					recentFlashes[i+1]=recentFlashes[i]; //shift values to the right
+					i--;
+				}
+				recentFlashes[0] = flashEnd; // push new value into first element of array
+				recentFlashesStackPointer++;
+
 				UPDATE7SEG_FLAG = 1; // genericTasks() will increment 7 segment display
 				if (SEGMENT_DISPLAY != '9') { // limit 7 segment display to '9'
 					SEGMENT_DISPLAY += 1;
@@ -586,35 +616,21 @@ static void survivalTasks(void) {
 		}
 	} else {
 		RESET_LED_COUNTDOWN = 0;
-		ledOn = 0xffff;
+		ledOn = 0xffff; // restart countdown sequence
 	}
 
 	pca9532_setLeds(ledOn, 0xffff);
 
-	if (ledOn == 0) { // no lightning in past 4s
+	if (ledOn == 0) { // no lightning in previous 4s, safe to switch to EXPLORER_MODE
 		OPERATION_MODE = EXPLORER_MODE;
 	}
 }
 
 static void genericTasks(void){
 
-	//DOES NOT WORK, ASSUMES LIGHTNING THRESHOLD CAN ONLY BE RAISED ONCE EVERY 50MS
-	//NEED TO CHANGE TO A DIFFERENT IMPLEMENTATION! (STORE LIGHTNING THRESHOLD IN ARRAY,
-	//COUNT DOWN LIGHTNING THRESHOLD FLAG?
-	if(LIGHTNING_THRESHOLD_FLAG == 1){
-		LIGHTNING_THRESHOLD_FLAG=0; //RESET LIGHTNING THRESHOLD FLAG
-		int i=7;
-		while(i>=0){
-			recentFlashes[i+1]=recentFlashes[i];
-			i--;
-		}
-		recentFlashes[0] = flashEnd; // push new value in
-		recentFlashesStackPointer++;
-	}
-
 	//check if count of lightning flashes is correct
 	CURRENT_TIME = getMsTicks();
-	if ((CURRENT_TIME > recentFlashes[recentFlashesStackPointer] + 3000) &&
+	if ((CURRENT_TIME > recentFlashes[recentFlashesStackPointer] + LIGHTNING_TIME_WINDOW) &&
 			recentFlashesStackPointer>=0){
 		recentFlashesStackPointer--;
 		if (SEGMENT_DISPLAY != '0') { // minimum display '0'
@@ -628,12 +644,27 @@ static void genericTasks(void){
 		led7seg_setChar(SEGMENT_DISPLAY, FALSE);
 	}
 
+	// CONDITION FOR SWITCHING TO SURVIVAL MODE
 	if ((recentFlashesStackPointer >= 3) && (OPERATION_MODE == EXPLORER_MODE)) {
 		OPERATION_MODE = SURVIVAL_MODE;
         oled_clearScreen(OLED_COLOR_BLACK);
+    	char lightArray[20];
+    	char tempArray[20];
+    	char xyzArray[20];
+    	sprintf(lightArray, "LS");
+    	sprintf(tempArray, "TS");
+    	sprintf(xyzArray, "AXS_AYS_AZS");
+    	oled_putString(0,0,(uint8_t*)lightArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+    	oled_putString(0,20,(uint8_t*)tempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+    	oled_putString(0,40,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	}
 	if (SW3_FLAG == 1) {
 		SW3_FLAG = 0;
+		int32_t light_value = readLightSensor();
+		int32_t temp_value = readTempSensor();
+		int32_t *xyz_values;
+		xyz_values = readAccelerometer();
+		printValues(light_value, temp_value, xyz_values); // print current sensor readings
 	}
 }
 
@@ -642,6 +673,7 @@ int main (void) {
     init_i2c();
     init_ssp();
     init_GPIO();
+    init_uart();
     init_Priority();
 
     pca9532_init();
