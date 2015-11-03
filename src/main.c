@@ -89,7 +89,7 @@ static int RGB_ON = 0;
 static uint32_t recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
 static int recentFlashesStackPointer = -1; // keeps track of how many flashes in past LIGHTNING_TIME_WINDOW
 
-// Timestamp checking beginning and end interrupt of each lightning flash > LIGHTNING_THRESHOLD
+// Timestamp checking beginning and end interrupt of each lightning flash that is > LIGHTNING_THRESHOLD
 // Lightning flash only counted if flashEnd-flashBeginning<500ms
 static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
@@ -153,17 +153,19 @@ uint32_t getMsTicks()
 
 /* ################# DEFINING SWITCHING ON AND OFF RGB ################### */
 
-void new_rgb_setLeds (uint8_t ledMask) // self defined function to blink RGB depending on OPERATION_MODE
+void new_rgb_setLeds (uint8_t ledMask) // self defined function to toggle red and blue RGB
 {
 	if (RGB_ON == 1) {
+		RGB_ON = 0; // toggle off
 		GPIO_ClearValue( 2, 1);
 		GPIO_ClearValue( 0, (1<<26) );
 	} else {
+		RGB_ON = 1; // toggle on
 		if ((ledMask & RGB_RED) != 0) {
-			GPIO_SetValue( 2, 1); // write a 1 instead of
+			GPIO_SetValue( 2, 1);
 		}
 		if ((ledMask & RGB_BLUE) != 0) {
-			GPIO_SetValue( 0, (1<<26) );
+			GPIO_SetValue( 0, (1<<26));
 		}
 	}
 }
@@ -350,10 +352,9 @@ static void init_GPIO(void)
 
 	GPIO_SetDir(1, 1<<31, 0);
 
-	// init rgb to output
+	// init red and blue rgb to output
     GPIO_SetDir( 2, 1, 1 );
     GPIO_SetDir( 0, (1<<26), 1 );
-    GPIO_SetDir( 2, (1<<1), 1 );
 }
 
 void pinsel_uart3(void) {
@@ -507,12 +508,6 @@ void TIMER1_IRQHandler(void){
 }
 
 void TIMER2_IRQHandler(void){
-	// toggle on-off
-	if (RGB_ON == 0) {
-		RGB_ON = 1;
-	} else {
-		RGB_ON = 0;
-	}
 	rgbBlinky();
 	TIM_ClearIntPending(LPC_TIM2,0);
 }
@@ -534,10 +529,14 @@ void EINT3_IRQHandler(void) {
 					i--;
 				}
 				recentFlashes[0] = flashEnd; // push new value into first element of array
-				recentFlashesStackPointer++;
+				if (recentFlashesStackPointer != 8) { // ensure pointer does not point outside the array
+					recentFlashesStackPointer++;
+				}
 
 				UPDATE7SEG_FLAG = 1; // genericTasks() will increment 7 segment display
-				if (SEGMENT_DISPLAY != '9') { // limit 7 segment display to '9'
+				if (SEGMENT_DISPLAY == NULL) {
+					SEGMENT_DISPLAY = '1';
+				} else if (SEGMENT_DISPLAY != '9') { // limit 7 segment display to '9'
 					SEGMENT_DISPLAY += 1;
 				}
 			}
@@ -573,9 +572,11 @@ void init_Interrupts(void) {
 
     LPC_GPIOINT->IO2IntEnF |= 1 << 5; // light sensor 3000 lux interrupt (P2.5)
     LPC_GPIOINT->IO2IntEnF |= 1 << 10; // SW3 (P2.10)
-}
 
-static char Array[20]; //array to write
+	enableTimer(RGB, 1000); // RGB will blink throughout operation
+	enableTimer(SAMPLING, 2000); //enable sampling timer when first going into loop
+	enableTimer(PCA9532, 250);
+}
 
 /* ################# TASK HANDLERS ################### */
 
@@ -591,7 +592,7 @@ static void explorerTasks(void){
 	}
 }
 
-//function to print values to oled screen, in 3 different lines
+//function to print sensor readings to oled screen, in 3 different lines
 void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 	char lightArray[20];
 	char tempArray[20];
@@ -610,7 +611,7 @@ void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 static void survivalTasks(void) {
 
 	if (RESET_LED_COUNTDOWN == 0) {
-		if (PCA9532_LED_COUNTDOWN_FLAG == 1) {
+		if (PCA9532_LED_COUNTDOWN_FLAG == 1) { // check if 250ms timer has interrupted
 			PCA9532_LED_COUNTDOWN_FLAG = 0;
 			ledOn = ledOn >> 1;
 		}
@@ -627,14 +628,15 @@ static void survivalTasks(void) {
 }
 
 static void genericTasks(void){
-
-	//check if count of lightning flashes is correct
+	//check if 7 segment count of lightning flashes is correct
 	CURRENT_TIME = getMsTicks();
 	if ((CURRENT_TIME > recentFlashes[recentFlashesStackPointer] + LIGHTNING_TIME_WINDOW) &&
-			recentFlashesStackPointer>=0){
+			recentFlashesStackPointer >= 0){ // stack pointer pointing to a valid value that has expired
 		recentFlashesStackPointer--;
-		if (SEGMENT_DISPLAY != '0') { // minimum display '0'
+		if (SEGMENT_DISPLAY != '1') { // minimum display '1'
 			SEGMENT_DISPLAY -= 1;
+		} else {
+			SEGMENT_DISPLAY = NULL; // turn off display
 		}
 		UPDATE7SEG_FLAG = 1;
 	}
@@ -700,9 +702,6 @@ int main (void) {
 
 	//initializeHOPE();
     init_Interrupts();
-	enableTimer(RGB, 1000); // RGB will blink throughout operation
-	enableTimer(SAMPLING, 2000); //enable sampling timer when first going into loop
-	enableTimer(PCA9532, 250);
 
 	//SEGMENT_DISPLAY = 0;
     while (1)
