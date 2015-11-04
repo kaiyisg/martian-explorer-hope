@@ -19,9 +19,6 @@
 //j13 from BLEN to PIO2_9 - use SW3 interrupt
 //remove j23 jumper at PIO1_10 to green RGB - disable green RGB
 
-
-
-
 //include brief summary of program functioning
 
 #include "lpc17xx_pinsel.h"
@@ -42,13 +39,16 @@
 #include "led7seg.h"
 #include "light.h"
 
+/* ############################################################# */
 /* ################# ASSIGNMENT SPECIFICATIONS ################# */
+/* ############################################################# */
 
 #define SAMPLING_TIME 2000 // ms, intervals sensor senses in explorer mode
 #define LIGHTNING_TIME_WINDOW 3000 // ms
 #define LIGHTNING_MONITORING 3000 // lux
 #define LIGHTNING_THRESHOLD 3000 // lux
 #define TIME_UNIT 250 // ms
+#define RANGE_K2 3892 // lux
 
 #define INDICATOR_EXPLORER RGB_BLUE
 #define INDICATOR_SURVIVAL RGB_RED
@@ -56,10 +56,13 @@
 static uint32_t CURRENT_TIME = 0;
 static uint32_t SEGMENT_DISPLAY = '0';
 
-static const char ENTER_SURVIVAL_MESSAGE[] = "Lightning Detected. Scheduled Telemetry is Temporarily Suspended.\n";
-static const char EXIT_SURVIVAL_MESSAGE[] = "Lightning Has Subsided. Scheduled Telemetry Will Now Resume.\n";
+static const char ENTER_SURVIVAL_MESSAGE[] = "Lightning Detected. Scheduled Telemetry is Temporarily Suspended.\r\n";
+static const char EXIT_SURVIVAL_MESSAGE[] = "Lightning Has Subsided. Scheduled Telemetry Will Now Resume.\r\n";
 
-/* ################# GLOBAL CONSTANTS ################# */
+/* ############################################################# */
+/* ##################### GLOBAL CONSTANTS ###################### */
+/* ############################################################# */
+
 // define available operation modes
 #define EXPLORER_MODE 0
 #define SURVIVAL_MODE 1
@@ -69,7 +72,10 @@ static const char EXIT_SURVIVAL_MESSAGE[] = "Lightning Has Subsided. Scheduled T
 #define RGB 2
 #define SAMPLING 3
 
-/* ################# GLOBAL VARIABLES ################# */
+/* ############################################################# */
+/* ##################### GLOBAL VARIABLES ###################### */
+/* ############################################################# */
+
 static int OPERATION_MODE = EXPLORER_MODE; // default starting operation mode explorer
 
 /* Accelerometer Variables */
@@ -88,6 +94,7 @@ static int RGB_ON = 0;
 // first element is newest value, last element is oldest
 static uint32_t recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
 static int recentFlashesStackPointer = -1; // keeps track of how many flashes in past LIGHTNING_TIME_WINDOW
+static int recentFlashesSize = sizeof(recentFlashes)/sizeof(recentFlashes[0]);
 
 // Timestamp checking beginning and end interrupt of each lightning flash that is > LIGHTNING_THRESHOLD
 // Lightning flash only counted if flashEnd-flashBeginning<500ms
@@ -95,15 +102,19 @@ static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
 static int aboveThreshold = 0;
 
+/* ############################################################# */
 /* ################# INTERRUPT HANDLER FLAGS ################### */
+/* ############################################################# */
 
-static int RESET_LED_COUNTDOWN = 0; // flag set to '1' if >3000 lux interrupt during survival mode
+static int STOP_LED_COUNTDOWN = 0; // resets and stops led countdown in survival mode until < LIGHTNING_MONITORING
 static int SW3_FLAG = 0;
-static int PCA9532_LED_COUNTDOWN_FLAG = 0;
 static int SAMPLING_FLAG = 0;
+static int NEW_LIGHTNING_FLAG = 0;
 static int UPDATE7SEG_FLAG = 0;
 
-/* ################# INTERRUPT PRIORITY SETTING ################### */
+/* ############################################################# */
+/* ############### INTERRUPT PRIORITY SETTING ################## */
+/* ############################################################# */
 
 void init_Priority(void){
 
@@ -138,7 +149,9 @@ void init_Priority(void){
 	NVIC_EnableIRQ(TIMER3_IRQn);
 }
 
-/* ################# DEFINING AND SYSTICK ################### */
+/* ############################################################# */
+/* ################## DEFINING AND SYSTICK ##################### */
+/* ############################################################# */
 
 volatile uint32_t msTicks;
 
@@ -151,7 +164,9 @@ uint32_t getMsTicks()
 	return msTicks;
 }
 
-/* ################# DEFINING SWITCHING ON AND OFF RGB ################### */
+/* ############################################################# */
+/* ########### DEFINING SWITCHING ON AND OFF RGB ############### */
+/* ############################################################# */
 
 void new_rgb_setLeds (uint8_t ledMask) // self defined function to toggle red and blue RGB
 {
@@ -170,7 +185,9 @@ void new_rgb_setLeds (uint8_t ledMask) // self defined function to toggle red an
 	}
 }
 
-/* ################# DEFINING FUNCTION AND NOTES FOR SPEAKER ################### */
+/* ############################################################# */
+/* ######### DEFINING FUNCTION AND NOTES FOR SPEAKER ########### */
+/* ############################################################# */
 
 #define NOTE_PIN_HIGH() GPIO_SetValue(0, 1<<26);
 #define NOTE_PIN_LOW()  GPIO_ClearValue(0, 1<<26);
@@ -281,7 +298,9 @@ static uint8_t * song = (uint8_t*)"C2.C2,D4,C4,F4,E8,";
         //(uint8_t*)"C2.C2,D4,C4,F4,E8,C2.C2,D4,C4,G4,F8,C2.C2,c4,A4,F4,E4,D4,A2.A2,H4,F4,G4,F8,";
         //"D4,B4,B4,A4,A4,G4,E4,D4.D2,E4,E4,A4,F4,D8.D4,d4,d4,c4,c4,B4,G4,E4.E2,F4,F4,A4,A4,G8,";
 
-/* ################# INITIALIZING SSP, I2C, GPIO ################### */
+/* ############################################################# */
+/* ############## INITIALIZING SSP, I2C, GPIO ################## */
+/* ############################################################# */
 
 static void init_ssp(void)
 {
@@ -380,7 +399,9 @@ void init_uart(void){
 	UART_TxCmd(LPC_UART3,ENABLE);
 }
 
-/* ################# INITIALIZING PERIPHERALS ################### */
+/* ############################################################# */
+/* ############ HELPER FUNCTIONS FOR PERIPHERALS ############### */
+/* ############################################################# */
 
 static int32_t readTempSensor(void) {
 	int32_t temperature = temp_read();
@@ -409,6 +430,19 @@ static int32_t * readAccelerometer(void) {
     return xyz_values; // return array
 }
 
+// function to print sensor readings to oled screen, in 3 different lines
+void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
+	char lightArray[20];
+	char tempArray[20];
+	char xyzArray[20];
+	sprintf(lightArray, "L%d", (int)light_value);
+	sprintf(tempArray, "T%d", (int)temp_value);
+	sprintf(xyzArray, "AX%d_AY%d_AZ%d", (int) *(xyz_values), (int) *(xyz_values+1),(int) *(xyz_values+2));
+	oled_putString(0,0,(uint8_t*)lightArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,10,(uint8_t*)tempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+}
+
 void rgbBlinky (void) {
 	if (OPERATION_MODE == EXPLORER_MODE) {
 		new_rgb_setLeds(INDICATOR_EXPLORER); // blue
@@ -431,7 +465,9 @@ void init_Speaker(void) {
     GPIO_ClearValue(2, 1<<13); //LM4811-shutdn
 }
 
-/* ################# INITIALIZING TIMER ################### */
+/* ############################################################# */
+/* ################### INITIALIZING TIMER ###################### */
+/* ############################################################# */
 
 // timerNumber is in range 1-3
 static void enableTimer(int timerNumber, uint32_t time) {
@@ -469,19 +505,9 @@ static void enableTimer(int timerNumber, uint32_t time) {
 	TIM_Cmd(TIMx, ENABLE);
 }
 
-static void disableTimer(int timerNumber) {
-	LPC_TIM_TypeDef *TIMx;
-	if (timerNumber == 1) {
-		TIMx = LPC_TIM1;
-	} else if (timerNumber == 2) {
-		TIMx = LPC_TIM2;
-	} else if (timerNumber == 3) {
-		TIMx = LPC_TIM3;
-	}
-	TIM_DeInit(TIMx);
-}
-
-/* ################# INITIALIZING HOPE ################### */
+/* ############################################################# */
+/* #################### INITIALIZING HOPE ###################### */
+/* ############################################################# */
 
 static void initializeHOPE(void) {
 	SEGMENT_DISPLAY = '0';
@@ -494,93 +520,114 @@ static void initializeHOPE(void) {
 			SEGMENT_DISPLAY += 1; // increment
 		}
 	}
-	led7seg_setChar(NULL, FALSE); // clear 7 segment display
-	if(readLightSensor() > LIGHTNING_THRESHOLD) {
-		aboveThreshold = 1;
-	}
+	SEGMENT_DISPLAY = NULL;
+	led7seg_setChar(SEGMENT_DISPLAY, FALSE); // clear 7 segment display
 }
 
-/* ################# INITIALIZING INTERUPTS ################### */
+/* ############################################################# */
+/* ################## INITIALIZING INTERRUPTS ################## */
+/* ############################################################# */
 
-void TIMER1_IRQHandler(void){
-	PCA9532_LED_COUNTDOWN_FLAG = 1;
+void TIMER1_IRQHandler(void){ // PCA9532 Timer
+	if (OPERATION_MODE == SURVIVAL_MODE && STOP_LED_COUNTDOWN == 0) {
+		ledOn = ledOn >> 1; // turn off one led by right shifting bit pattern
+		pca9532_setLeds(ledOn, 0xffff);
+	}
 	TIM_ClearIntPending(LPC_TIM1,0);
 }
 
-void TIMER2_IRQHandler(void){
+void TIMER2_IRQHandler(void){ // RGB timer
 	rgbBlinky();
 	TIM_ClearIntPending(LPC_TIM2,0);
 }
 
-void TIMER3_IRQHandler(void){
+void TIMER3_IRQHandler(void){ // Sampling Timer
 	SAMPLING_FLAG = 1;
 	TIM_ClearIntPending(LPC_TIM3,0);
 }
 
 void EINT3_IRQHandler(void) {
-	if ((LPC_GPIOINT->IO2IntStatF >> 5) & 0x1) { // light sensor cross 3000 lux threshold interrupt
-		if (aboveThreshold) {
-			flashEnd = getMsTicks();
-			if (flashEnd - flashBeginning < 500) {
-				// Push new value of flashEnd into recentFlashes
-				int i=7;
-				while(i>=0){
-					recentFlashes[i+1]=recentFlashes[i]; //shift values to the right
-					i--;
-				}
-				recentFlashes[0] = flashEnd; // push new value into first element of array
-				if (recentFlashesStackPointer != 8) { // ensure pointer does not point outside the array
-					recentFlashesStackPointer++;
-				}
-
-				UPDATE7SEG_FLAG = 1; // genericTasks() will increment 7 segment display
-				if (SEGMENT_DISPLAY == NULL) {
-					SEGMENT_DISPLAY = '1';
-				} else if (SEGMENT_DISPLAY != '9') { // limit 7 segment display to '9'
-					SEGMENT_DISPLAY += 1;
-				}
-			}
-			aboveThreshold = 0;
-		   // uint16_t a=flashEnd;
-		   // printf("flash End: %" PRIu32 "\n",a);
-		} else {
-			flashBeginning = getMsTicks();
-			if (OPERATION_MODE == SURVIVAL_MODE) {
-				RESET_LED_COUNTDOWN = 1;
-			}
-			aboveThreshold = 1;
-		    //uint16_t a=flashBeginning;
-		    //printf("flash begin: %" PRIu32 "\n",a);
-		}
+	if ((LPC_GPIOINT->IO2IntStatF) >> 5 & 0x1) { // Light Sensor Interrupt
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
+
+		if (aboveThreshold) { // Interrupt indicates light reading went below threshold
+			aboveThreshold = 0;
+			// Sense for threshold exceed again
+			light_setHiThreshold(LIGHTNING_THRESHOLD);
+			light_setLoThreshold(0); // disable low threshold
+
+			if (OPERATION_MODE == SURVIVAL_MODE) {
+				STOP_LED_COUNTDOWN = 0;
+			}
+			flashEnd = getMsTicks();
+			uint32_t a=flashEnd;
+			printf("flash end at: %" PRIu32 "ms\n",a);
+			fflush(stdout);
+			if (flashEnd - flashBeginning < 500) {
+				NEW_LIGHTNING_FLAG = 1; // push new value to recentFlashes[]
+			}
+
+		} else { // Interrupt indicates light reading exceeded threshold
+			aboveThreshold = 1;
+			// Sense for fall below threshold
+			light_setLoThreshold(LIGHTNING_THRESHOLD);
+			light_setHiThreshold(RANGE_K2-1); // disable high threshold
+
+			flashBeginning = getMsTicks();
+			uint32_t a=flashBeginning;
+			printf("flash begin at: %" PRIu32 "ms\n",a);
+			fflush(stdout);
+			if (OPERATION_MODE == SURVIVAL_MODE) {
+				STOP_LED_COUNTDOWN = 1;
+				ledOn = 0xffff; // reset countdown sequence
+				pca9532_setLeds(ledOn, 0xffff);
+			}
+		}
 	}
 
 	if ((LPC_GPIOINT->IO2IntStatF >> 10) & 0x1) { // SW3 interrupt
-		SW3_FLAG = 1;
 		LPC_GPIOINT->IO2IntClr = (1<<10);
+		SW3_FLAG = 1;
 	}
 }
 
 void init_Interrupts(void) {
+
     // Setup Interrupt for Light Sensor
-    light_enable();
     light_setRange(LIGHT_RANGE_4000); // sensing up to 3892 lux
-    light_setHiThreshold(LIGHTNING_THRESHOLD); // condition for interrupt
     light_setIrqInCycles(LIGHT_CYCLE_1);
     light_clearIrqStatus();
+    light_enable();
+
+    // Determine initial light conditions
+    uint32_t initial_light_value = light_read();
+    if (initial_light_value > LIGHTNING_THRESHOLD) {
+    	// Initialize interrupt to trigger on falling below threshold
+    	aboveThreshold = 1;
+    	light_setLoThreshold(LIGHTNING_THRESHOLD);
+    	light_setHiThreshold(RANGE_K2-1); // disable high threshold
+    } else {
+        // Initialize interrupt to trigger on exceeding threshold
+    	aboveThreshold = 0;
+        light_setHiThreshold(LIGHTNING_THRESHOLD);
+        light_setLoThreshold(0); // disable low threshold
+    }
 
     LPC_GPIOINT->IO2IntEnF |= 1 << 5; // light sensor 3000 lux interrupt (P2.5)
     LPC_GPIOINT->IO2IntEnF |= 1 << 10; // SW3 (P2.10)
 
-	enableTimer(RGB, 1000); // RGB will blink throughout operation
-	enableTimer(SAMPLING, 2000); //enable sampling timer when first going into loop
+	enableTimer(RGB, 1000); // RGB will blink throughout operation at 1000ms interval
+	enableTimer(SAMPLING, 2000);
 	enableTimer(PCA9532, 250);
 }
 
-/* ################# TASK HANDLERS ################### */
+/* ############################################################# */
+/* ##################### TASK HANDLERS ######################### */
+/* ############################################################# */
 
 static void explorerTasks(void){
+
 	if (SAMPLING_FLAG == 1) {
 		SAMPLING_FLAG = 0;
 		int32_t light_value = readLightSensor();
@@ -590,45 +637,21 @@ static void explorerTasks(void){
 		printValues(light_value, temp_value, xyz_values);
 		// TRANSMIT DATA TO HOME
 	}
-}
 
-//function to print sensor readings to oled screen, in 3 different lines
-void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
-	char lightArray[20];
-	char tempArray[20];
-	char xyzArray[20];
-	sprintf(lightArray, "L%d", (int)light_value);
-	sprintf(tempArray, "T%d", (int)temp_value);
-	sprintf(xyzArray, "AX%d_AY%d_AZ%d", (int) *(xyz_values), (int) *(xyz_values+1),(int) *(xyz_values+2));
-	printf("L%d\n", (int)light_value);
-	fflush(stdin);
-	fflush(stdout);
-	oled_putString(0,0,(uint8_t*)lightArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,20,(uint8_t*)tempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,40,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
 static void survivalTasks(void) {
 
-	if (RESET_LED_COUNTDOWN == 0) {
-		if (PCA9532_LED_COUNTDOWN_FLAG == 1) { // check if 250ms timer has interrupted
-			PCA9532_LED_COUNTDOWN_FLAG = 0;
-			ledOn = ledOn >> 1;
-		}
-	} else {
-		RESET_LED_COUNTDOWN = 0;
-		ledOn = 0xffff; // restart countdown sequence
-	}
-
-	pca9532_setLeds(ledOn, 0xffff);
-
 	if (ledOn == 0) { // no lightning in previous 4s, safe to switch to EXPLORER_MODE
 		OPERATION_MODE = EXPLORER_MODE;
+    	UART_Send(LPC_UART3, (uint8_t *)EXIT_SURVIVAL_MESSAGE , strlen(EXIT_SURVIVAL_MESSAGE), BLOCKING);
 	}
+
 }
 
 static void genericTasks(void){
-	//check if 7 segment count of lightning flashes is correct
+
+	//check if 7 segment count of lightning flashes is up-to-date
 	CURRENT_TIME = getMsTicks();
 	if ((CURRENT_TIME > recentFlashes[recentFlashesStackPointer] + LIGHTNING_TIME_WINDOW) &&
 			recentFlashesStackPointer >= 0){ // stack pointer pointing to a valid value that has expired
@@ -641,25 +664,49 @@ static void genericTasks(void){
 		UPDATE7SEG_FLAG = 1;
 	}
 
+	if (NEW_LIGHTNING_FLAG == 1) {
+		NEW_LIGHTNING_FLAG = 0;
+		// Push new value of flashEnd into recentFlashes
+		int i=7;
+		while(i>=0){
+			recentFlashes[i+1]=recentFlashes[i]; //shift values to the right
+			i--;
+		}
+		recentFlashes[0] = flashEnd; // push new value into first element of array
+		if (recentFlashesStackPointer != recentFlashesSize-1) {
+			recentFlashesStackPointer++; // increment only if pointer does not point outside the array
+		}
+
+		if (SEGMENT_DISPLAY == NULL) { // turn off 7 segment display
+			SEGMENT_DISPLAY = '1';
+			UPDATE7SEG_FLAG = 1;
+		} else if (SEGMENT_DISPLAY != '9') { // limit 7 segment display to '9'
+			SEGMENT_DISPLAY += 1;
+			UPDATE7SEG_FLAG = 1;
+		}
+	}
+
 	if (UPDATE7SEG_FLAG == 1) {
 		UPDATE7SEG_FLAG = 0;
 		led7seg_setChar(SEGMENT_DISPLAY, FALSE);
 	}
 
 	// CONDITION FOR SWITCHING TO SURVIVAL MODE
-	if ((recentFlashesStackPointer >= 3) && (OPERATION_MODE == EXPLORER_MODE)) {
+	if ((recentFlashesStackPointer >= 2) && (OPERATION_MODE == EXPLORER_MODE)) {
 		OPERATION_MODE = SURVIVAL_MODE;
-        oled_clearScreen(OLED_COLOR_BLACK);
     	char lightArray[20];
     	char tempArray[20];
     	char xyzArray[20];
     	sprintf(lightArray, "LS");
     	sprintf(tempArray, "TS");
     	sprintf(xyzArray, "AXS_AYS_AZS");
+        oled_clearScreen(OLED_COLOR_BLACK);
     	oled_putString(0,0,(uint8_t*)lightArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-    	oled_putString(0,20,(uint8_t*)tempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-    	oled_putString(0,40,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+    	oled_putString(0,10,(uint8_t*)tempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+    	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+    	UART_Send(LPC_UART3, (uint8_t *)ENTER_SURVIVAL_MESSAGE , strlen(ENTER_SURVIVAL_MESSAGE), BLOCKING);
 	}
+
 	if (SW3_FLAG == 1) {
 		SW3_FLAG = 0;
 		int32_t light_value = readLightSensor();
@@ -667,8 +714,24 @@ static void genericTasks(void){
 		int32_t *xyz_values;
 		xyz_values = readAccelerometer();
 		printValues(light_value, temp_value, xyz_values); // print current sensor readings
+		static char msg[50] ="L";
+		strcat(msg,(int)light_value);
+		strcat(msg,"_T");
+		strcat(msg,(int)temp_value);
+		strcat(msg,"_AX");
+		strcat(msg,(int) *(xyz_values));
+		strcat(msg,"_AY");
+		strcat(msg,(int) *(xyz_values+1));
+		strcat(msg,"_AZ");
+		strcat(msg,(int) *(xyz_values+2));
+		strcat(msg,"\r\n");
+		UART_Send(LPC_UART3, (uint8_t *)msg, strlen(msg), BLOCKING); // send sensor readings to HOME
 	}
 }
+
+/* ############################################################# */
+/* #################### MAIN FUNCTION ########################## */
+/* ############################################################# */
 
 int main (void) {
 
@@ -685,6 +748,10 @@ int main (void) {
 	led7seg_init();
     temp_init(&getMsTicks);
 
+    // TEST MESSAGE
+    char msg[] = "hi";
+	UART_Send(LPC_UART3, (uint8_t *)msg, strlen(msg), BLOCKING);
+
     if(SysTick_Config(SystemCoreClock/1000)){
     	while(1); //capture error
     }
@@ -700,10 +767,9 @@ int main (void) {
     // Initialize OLED
     oled_clearScreen(OLED_COLOR_BLACK);
 
-	//initializeHOPE();
+	initializeHOPE();
     init_Interrupts();
 
-	//SEGMENT_DISPLAY = 0;
     while (1)
     {
     	genericTasks();
