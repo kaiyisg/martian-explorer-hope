@@ -109,6 +109,62 @@ static uint32_t flashEnd = 0;
 static int aboveThreshold = 0;
 
 /* ############################################################# */
+/* ################## DEFINING AND SYSTICK ##################### */
+/* ############################################################# */
+
+volatile uint32_t msTicks;
+
+void SysTick_Handler(void){
+	msTicks++;
+}
+
+uint32_t getMsTicks()
+{
+	return msTicks;
+}
+
+/* ############################################################# */
+/* ################### INITIALIZING TIMER ###################### */
+/* ############################################################# */
+
+// timerNumber is in range 1-3
+static void enableTimer(int timerNumber, uint32_t time){
+	TIM_TIMERCFG_Type TIM_ConfigStruct;
+	TIM_MATCHCFG_Type TIM_MatchConfigStruct ;
+
+	// Initialize timer 0, prescale count time of 1ms
+	TIM_ConfigStruct.PrescaleOption = TIM_PRESCALE_USVAL;
+	TIM_ConfigStruct.PrescaleValue	= 1000;
+	// use channel 0, MR0
+	TIM_MatchConfigStruct.MatchChannel = 0;
+	// Enable interrupt when MR0 matches the value in TC register
+	TIM_MatchConfigStruct.IntOnMatch   = TRUE;
+	//Enable reset on MR0: TIMER will reset if interrupt triggered
+	TIM_MatchConfigStruct.ResetOnMatch = TRUE;
+	//Continue running after interrupt has occurred
+	TIM_MatchConfigStruct.StopOnMatch = FALSE;
+	//do no thing for external output
+	TIM_MatchConfigStruct.ExtMatchOutputType = TIM_EXTMATCH_NOTHING;
+	// Set Match value, count value is time (timer * 1000uS =timer mS )
+	TIM_MatchConfigStruct.MatchValue = time;
+
+	LPC_TIM_TypeDef *TIMx; // select Timer0, Timer1 or Timer2
+	if (timerNumber == 1) {
+		TIMx = LPC_TIM1;
+	} else if (timerNumber == 2) {
+		TIMx = LPC_TIM2;
+	} else if (timerNumber == 3) {
+		TIMx = LPC_TIM3;
+	}
+
+	// Set configuration for Tim_config and Tim_MatchConfig
+	TIM_Init(TIMx,TIM_TIMER_MODE,&TIM_ConfigStruct);
+	TIM_ConfigMatch(TIMx,&TIM_MatchConfigStruct);
+	TIM_Cmd(TIMx, ENABLE);
+}
+
+
+/* ############################################################# */
 /* ############## INITIALIZING SSP, I2C, GPIO ################## */
 /* ############################################################# */
 
@@ -186,7 +242,7 @@ static void init_GPIO(void)
     GPIO_SetDir( 0, (1<<26), 1 );
 }
 
-void pinsel_uart3(void) {
+void pinsel_uart3(void){
 	PINSEL_CFG_Type PinCfg;
 	PinCfg.Funcnum = 2;
 	PinCfg.Pinnum = 0;
@@ -254,7 +310,7 @@ void init_Priority(void){
 	NVIC_EnableIRQ(TIMER3_IRQn);
 }
 
-void init_Interrupts(void) {
+void init_Interrupts(void){
 
     // Setup Interrupt for Light Sensor
     light_setRange(LIGHT_RANGE_4000); // sensing up to 3892 lux
@@ -302,7 +358,7 @@ void TIMER3_IRQHandler(void){ // Sampling Timer
 	TIM_ClearIntPending(LPC_TIM3,0);
 }
 
-void EINT3_IRQHandler(void) {
+void EINT3_IRQHandler(void){
 	if ((LPC_GPIOINT->IO2IntStatF) >> 5 & 0x1) { // Light Sensor Interrupt
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
@@ -348,20 +404,6 @@ void EINT3_IRQHandler(void) {
 	}
 }
 
-/* ############################################################# */
-/* ################## DEFINING AND SYSTICK ##################### */
-/* ############################################################# */
-
-volatile uint32_t msTicks;
-
-void SysTick_Handler(void){
-	msTicks++;
-}
-
-uint32_t getMsTicks()
-{
-	return msTicks;
-}
 
 /* ############################################################# */
 /* ######### DEFINING FUNCTION AND NOTES FOR SPEAKER ########### */
@@ -444,7 +486,7 @@ static uint32_t getPause(uint8_t ch)
     }
 }
 
-static void playSong(uint8_t *song) {
+static void playSong(uint8_t *song){
     uint32_t note = 0;
     uint32_t dur  = 0;
     uint32_t pause = 0;
@@ -480,17 +522,17 @@ static uint8_t * song = (uint8_t*)"C2.C2,D4,C4,F4,E8,";
 /* ############ HELPER FUNCTIONS FOR PERIPHERALS ############### */
 /* ############################################################# */
 
-static int32_t readTempSensor(void) {
+static int32_t readTempSensor(void){
 	int32_t temperature = temp_read();
 	return temperature/10.0; // temperature in Celsius
 }
 
-static int32_t readLightSensor(void) {
+static int32_t readLightSensor(void){
 	int32_t light_value = light_read();
 	return light_value; // light intensity in lux
 }
 
-static int32_t * readAccelerometer(void) {
+static int32_t * readAccelerometer(void){
     /*
      * Assume base board in zero-g position when reading first value.
      */
@@ -521,7 +563,7 @@ void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 }
 
 // Function to toggle red and blue LEDs
-void new_rgb_setLeds (uint8_t ledMask) {
+void new_rgb_setLeds(uint8_t ledMask){
 	if (RGB_ON == 1) {
 		RGB_ON = 0; // toggle off
 		GPIO_ClearValue( 2, 1);
@@ -537,7 +579,7 @@ void new_rgb_setLeds (uint8_t ledMask) {
 	}
 }
 
-void rgbBlinky (void) {
+void rgbBlinky (void){
 	if (OPERATION_MODE == EXPLORER_MODE) {
 		new_rgb_setLeds(INDICATOR_EXPLORER); // blue
 	} else {
@@ -545,7 +587,7 @@ void rgbBlinky (void) {
 	}
 }
 
-void init_Speaker(void) {
+void init_Speaker(void){
     GPIO_SetDir(2, 1<<0, 1);
     GPIO_SetDir(2, 1<<1, 1);
 
@@ -559,53 +601,49 @@ void init_Speaker(void) {
     GPIO_ClearValue(2, 1<<13); //LM4811-shutdn
 }
 
-void resetExplorer(void);
+void resetExplorer(void){ // reset all global variables and peripherals to initial values
 
-/* ############################################################# */
-/* ################### INITIALIZING TIMER ###################### */
-/* ############################################################# */
+	OPERATION_MODE = EXPLORER_MODE;
 
-// timerNumber is in range 1-3
-static void enableTimer(int timerNumber, uint32_t time) {
-	TIM_TIMERCFG_Type TIM_ConfigStruct;
-	TIM_MATCHCFG_Type TIM_MatchConfigStruct ;
+	/* Accelerometer Variables */
+	xoff = 0;
+	yoff = 0;
+	zoff = 0;
 
-	// Initialize timer 0, prescale count time of 1ms
-	TIM_ConfigStruct.PrescaleOption = TIM_PRESCALE_USVAL;
-	TIM_ConfigStruct.PrescaleValue	= 1000;
-	// use channel 0, MR0
-	TIM_MatchConfigStruct.MatchChannel = 0;
-	// Enable interrupt when MR0 matches the value in TC register
-	TIM_MatchConfigStruct.IntOnMatch   = TRUE;
-	//Enable reset on MR0: TIMER will reset if interrupt triggered
-	TIM_MatchConfigStruct.ResetOnMatch = TRUE;
-	//Continue running after interrupt has occurred
-	TIM_MatchConfigStruct.StopOnMatch = FALSE;
-	//do no thing for external output
-	TIM_MatchConfigStruct.ExtMatchOutputType = TIM_EXTMATCH_NOTHING;
-	// Set Match value, count value is time (timer * 1000uS =timer mS )
-	TIM_MatchConfigStruct.MatchValue = time;
+    acc_read(&x, &y, &z);
+    xoff = 0;
+    yoff = 0;
+    zoff = 0-z;
 
-	LPC_TIM_TypeDef *TIMx; // select Timer0, Timer1 or Timer2
-	if (timerNumber == 1) {
-		TIMx = LPC_TIM1;
-	} else if (timerNumber == 2) {
-		TIMx = LPC_TIM2;
-	} else if (timerNumber == 3) {
-		TIMx = LPC_TIM3;
-	}
+	ledOn = 0xffff; // pca9532 led bit pattern
+	RGB_ON = 0;
 
-	// Set configuration for Tim_config and Tim_MatchConfig
-	TIM_Init(TIMx,TIM_TIMER_MODE,&TIM_ConfigStruct);
-	TIM_ConfigMatch(TIMx,&TIM_MatchConfigStruct);
-	TIM_Cmd(TIMx, ENABLE);
+	static uint32_t tempArray[9] = {0,0,0,0,0,0,0,0,0};
+	memcpy(recentFlashes, tempArray, recentFlashesSize);
+	recentFlashesStackPointer = -1; // keeps track of how many flashes in past LIGHTNING_TIME_WINDOW
+
+	// Timestamp checking beginning and end interrupt of each lightning flash that is > LIGHTNING_THRESHOLD
+	// Lightning flash only counted if flashEnd-flashBeginning<500ms
+	flashBeginning = 0;
+	flashEnd = 0;
+	aboveThreshold = 0;
+
+	/* RESET FLAGS */
+	STOP_LED_COUNTDOWN = 0; // resets and stops led countdown in survival mode until < LIGHTNING_MONITORING
+	SW3_FLAG = 0;
+	SAMPLING_FLAG = 0;
+	NEW_LIGHTNING_FLAG = 0;
+	UPDATE7SEG_FLAG = 0;
+
+	/* RESET PERIPHERALS */
+	pca9532_setLeds(ledOn, 0xffff);
 }
 
 /* ############################################################# */
 /* #################### INITIALIZING HOPE ###################### */
 /* ############################################################# */
 
-static void initializeHOPE(void) {
+static void initializeHOPE(void){
 	SEGMENT_DISPLAY = '0';
 	while (SEGMENT_DISPLAY != 'G') { // increment until segment displays 'F'
 		led7seg_setChar(SEGMENT_DISPLAY, FALSE); // display new incremented value
@@ -638,7 +676,7 @@ static void explorerTasks(void){
 
 }
 
-static void survivalTasks(void) {
+static void survivalTasks(void){
 
 	if (ledOn == 0) { // no lightning in previous 4s, safe to switch to EXPLORER_MODE
 		OPERATION_MODE = EXPLORER_MODE;
@@ -731,7 +769,7 @@ static void genericTasks(void){
 /* #################### MAIN FUNCTION ########################## */
 /* ############################################################# */
 
-int main (void) {
+int main(void){
 
     init_i2c();
     init_ssp();
