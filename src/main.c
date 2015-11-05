@@ -38,6 +38,8 @@
 #include "temp.h"
 #include "led7seg.h"
 #include "light.h"
+#include "rotary.h"
+
 
 /* ############################################################# */
 /* ################# ASSIGNMENT SPECIFICATIONS ################# */
@@ -74,6 +76,9 @@ static const char EXIT_SURVIVAL_MESSAGE[] =
 #define RGB 2
 #define SAMPLING 3
 
+#define HIGHER_NOTE 0
+#define LOWER_NOTE 1
+
 /* ############################################################# */
 /* ##################### GLOBAL VARIABLES ###################### */
 /* ############################################################# */
@@ -107,6 +112,8 @@ static int recentFlashesSize = sizeof(recentFlashes)/sizeof(recentFlashes[0]);
 static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
 static int aboveThreshold = 0;
+
+uint8_t alarmNote = 'a';
 
 /* ############################################################# */
 /* ################## DEFINING AND SYSTICK ##################### */
@@ -225,7 +232,7 @@ static void init_i2c(void)
 
 static void init_GPIO(void)
 {
-	// initialize SW4 (default config)
+	// initialize SW4
 	PINSEL_CFG_Type PinCfg;
 
 	PinCfg.Funcnum = 0;
@@ -234,8 +241,40 @@ static void init_GPIO(void)
 	PinCfg.Portnum = 1;
 	PinCfg.Pinnum = 31;
 	PINSEL_ConfigPin(&PinCfg);
-
 	GPIO_SetDir(1, 1<<31, 0);
+
+	// initialize SW3
+	PinCfg.Portnum = 2;
+	PinCfg.Pinnum = 10;
+	PINSEL_ConfigPin(&PinCfg);
+	GPIO_SetDir(2, 1<<10, 0);
+
+	// initialize rotary switch
+	PinCfg.Portnum = 0;
+	PinCfg.Pinnum = 24;
+	PINSEL_ConfigPin(&PinCfg);
+	PinCfg.Pinnum = 25;
+	PINSEL_ConfigPin(&PinCfg);
+	GPIO_SetDir(0, 1<<24, 0);
+	GPIO_SetDir(0, 1<<25, 0);
+
+	//initialize joystick
+	PinCfg.Pinnum = 17;
+	PINSEL_ConfigPin(&PinCfg);
+	PinCfg.Pinnum = 15;
+	PINSEL_ConfigPin(&PinCfg);
+	PinCfg.Pinnum = 16;
+	PINSEL_ConfigPin(&PinCfg);
+	PinCfg.Portnum = 2;
+	PinCfg.Pinnum = 3;
+	PINSEL_ConfigPin(&PinCfg);
+	PinCfg.Pinnum = 4;
+	PINSEL_ConfigPin(&PinCfg);
+	GPIO_SetDir(0, 1<<17, 0); // center
+	GPIO_SetDir(0, 1<<15, 0); // left
+	GPIO_SetDir(0, 1<<16, 0); // right
+	GPIO_SetDir(2, 1<<3, 0); // up
+	GPIO_SetDir(2, 1<<4, 0); // down
 
 	// init red and blue rgb to output
     GPIO_SetDir( 2, 1, 1 );
@@ -332,12 +371,66 @@ void init_Interrupts(void){
         light_setLoThreshold(0); // disable low threshold
     }
 
+    LPC_GPIOINT->IO2IntClr = 1 << 5;
+    LPC_GPIOINT->IO2IntClr = 1 << 10;
+    LPC_GPIOINT->IO0IntClr = 1 << 24;
+    LPC_GPIOINT->IO0IntClr = 1 << 25;
+    LPC_GPIOINT->IO0IntClr = 1 << 17;
+    LPC_GPIOINT->IO0IntClr = 1 << 15;
+    LPC_GPIOINT->IO0IntClr = 1 << 16;
+    LPC_GPIOINT->IO2IntClr = 1 << 3;
+    LPC_GPIOINT->IO2IntClr = 1 << 4;
+
     LPC_GPIOINT->IO2IntEnF |= 1 << 5; // light sensor 3000 lux interrupt (P2.5)
     LPC_GPIOINT->IO2IntEnF |= 1 << 10; // SW3 (P2.10)
+    LPC_GPIOINT->IO0IntEnF |= 1 << 24; // rotary switch right
+    LPC_GPIOINT->IO0IntEnF |= 1 << 25; // rotary switch left
+    // joystick
+    LPC_GPIOINT->IO0IntEnF |= 1 << 17; // center
+    LPC_GPIOINT->IO0IntEnF |= 1 << 15; // left
+    LPC_GPIOINT->IO0IntEnF |= 1 << 16; // right
+    LPC_GPIOINT->IO2IntEnF |= 1 << 3; // up
+    LPC_GPIOINT->IO2IntEnF |= 1 << 4; // down
 
 	enableTimer(RGB, 1000); // RGB will blink throughout operation at 1000ms interval
 	enableTimer(SAMPLING, 2000);
 	enableTimer(PCA9532, 250);
+}
+
+void lightning_Interrupt_Handler(void){
+	if (aboveThreshold) { // Interrupt indicates light reading went below threshold
+		aboveThreshold = 0;
+		// Sense for threshold exceed again
+		light_setHiThreshold(LIGHTNING_THRESHOLD);
+		light_setLoThreshold(0); // disable low threshold
+
+		if (OPERATION_MODE == SURVIVAL_MODE) {
+			STOP_LED_COUNTDOWN = 0;
+		}
+		flashEnd = getMsTicks();
+		uint32_t a=flashEnd;
+		printf("flash end at: %" PRIu32 "ms\n",a);
+		fflush(stdout);
+		if (flashEnd - flashBeginning < 500) {
+			NEW_LIGHTNING_FLAG = 1; // push new value to recentFlashes[]
+		}
+
+	} else { // Interrupt indicates light reading exceeded threshold
+		aboveThreshold = 1;
+		// Sense for fall below threshold
+		light_setLoThreshold(LIGHTNING_THRESHOLD);
+		light_setHiThreshold(RANGE_K2-1); // disable high threshold
+
+		flashBeginning = getMsTicks();
+		uint32_t a=flashBeginning;
+		printf("flash begin at: %" PRIu32 "ms\n",a);
+		fflush(stdout);
+		if (OPERATION_MODE == SURVIVAL_MODE) {
+			STOP_LED_COUNTDOWN = 1;
+			ledOn = 0xffff; // reset countdown sequence
+			pca9532_setLeds(ledOn, 0xffff);
+		}
+	}
 }
 
 void TIMER1_IRQHandler(void){ // PCA9532 Timer
@@ -362,48 +455,25 @@ void EINT3_IRQHandler(void){
 	if ((LPC_GPIOINT->IO2IntStatF) >> 5 & 0x1) { // Light Sensor Interrupt
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
-
-		if (aboveThreshold) { // Interrupt indicates light reading went below threshold
-			aboveThreshold = 0;
-			// Sense for threshold exceed again
-			light_setHiThreshold(LIGHTNING_THRESHOLD);
-			light_setLoThreshold(0); // disable low threshold
-
-			if (OPERATION_MODE == SURVIVAL_MODE) {
-				STOP_LED_COUNTDOWN = 0;
-			}
-			flashEnd = getMsTicks();
-			uint32_t a=flashEnd;
-			printf("flash end at: %" PRIu32 "ms\n",a);
-			fflush(stdout);
-			if (flashEnd - flashBeginning < 500) {
-				NEW_LIGHTNING_FLAG = 1; // push new value to recentFlashes[]
-			}
-
-		} else { // Interrupt indicates light reading exceeded threshold
-			aboveThreshold = 1;
-			// Sense for fall below threshold
-			light_setLoThreshold(LIGHTNING_THRESHOLD);
-			light_setHiThreshold(RANGE_K2-1); // disable high threshold
-
-			flashBeginning = getMsTicks();
-			uint32_t a=flashBeginning;
-			printf("flash begin at: %" PRIu32 "ms\n",a);
-			fflush(stdout);
-			if (OPERATION_MODE == SURVIVAL_MODE) {
-				STOP_LED_COUNTDOWN = 1;
-				ledOn = 0xffff; // reset countdown sequence
-				pca9532_setLeds(ledOn, 0xffff);
-			}
-		}
+		lightning_Interrupt_Handler();
 	}
 
 	if ((LPC_GPIOINT->IO2IntStatF >> 10) & 0x1) { // SW3 interrupt
 		LPC_GPIOINT->IO2IntClr = (1<<10);
 		SW3_FLAG = 1;
 	}
-}
 
+	if ((LPC_GPIOINT->IO0IntStatF >> 24) & 0x3) { // either P0.24 or P0.25 triggered (rotary switch)
+		LPC_GPIOINT->IO0IntClr = 0x3 << 24; // clear bits 24 and 25
+		uint8_t rotaryState;
+		rotaryState = rotary_read();
+		if (rotaryState == ROTARY_RIGHT) {
+			alarmNote = changeNote(alarmNote, HIGHER_NOTE);
+		} else if (rotaryState == ROTARY_LEFT) {
+			alarmNote = changeNote(alarmNote, LOWER_NOTE);
+		}
+	}
+}
 
 /* ############################################################# */
 /* ######### DEFINING FUNCTION AND NOTES FOR SPEAKER ########### */
@@ -451,6 +521,27 @@ static void playNote(uint32_t note, uint32_t durationMs) {
     	Timer0_Wait(durationMs);
         //delay32Ms(0, durationMs);
     }
+}
+
+static uint8_t changeNote(uint8_t note, uint8_t change){
+	if (change == HIGHER_NOTE) {
+		if (note != 'g') { // highest note is g
+			if (note == 'G') {
+				return 'a';
+			} else {
+				return note + 1;
+			}
+		}
+	} else if (change == LOWER_NOTE) {
+		if (note != 'A') { // lowest note is A
+			if (note == 'a') {
+				return 'G';
+			} else {
+				return note - 1;
+			}
+		}
+	}
+	return note; // no change
 }
 
 static uint32_t getNote(uint8_t ch)
@@ -636,9 +727,12 @@ void resetExplorer(void){ // reset all global variables and peripherals to initi
 	SAMPLING_FLAG = 0;
 	NEW_LIGHTNING_FLAG = 0;
 	UPDATE7SEG_FLAG = 0;
+	SEGMENT_DISPLAY = '0';
 
 	/* RESET PERIPHERALS */
-	pca9532_setLeds(ledOn, 0xffff);
+	pca9532_setLeds(0x0000, 0xffff);
+	led7seg_setChar(NULL, FALSE);
+	oled_clearScreen(OLED_COLOR_BLACK);
 }
 
 /* ############################################################# */
@@ -849,17 +943,9 @@ static void genericTasks(void){
 		int32_t *xyz_values;
 		xyz_values = readAccelerometer();
 		printValues(light_value, temp_value, xyz_values); // print current sensor readings
-		static char msg[50] ="L";
-		strcat(msg,(int)light_value);
-		strcat(msg,"_T");
-		strcat(msg,(int)temp_value);
-		strcat(msg,"_AX");
-		strcat(msg,(int) *(xyz_values));
-		strcat(msg,"_AY");
-		strcat(msg,(int) *(xyz_values+1));
-		strcat(msg,"_AZ");
-		strcat(msg,(int) *(xyz_values+2));
-		strcat(msg,"\r\n");
+		char msg[50];
+		snprintf(msg,sizeof(msg),"L%d_T%d_AX%d_AY%d_AZ%d\r\n",(int)light_value,(int)temp_value,
+				(int)*(xyz_values),(int)*(xyz_values+1),(int)*(xyz_values+2));
 		UART_Send(LPC_UART3, (uint8_t *)msg, strlen(msg), BLOCKING); // send sensor readings to HOME
 	}
 }
@@ -882,6 +968,7 @@ int main(void){
     oled_init();
 	led7seg_init();
     temp_init(&getMsTicks);
+    rotary_init();
 
     // TEST MESSAGE
     char msg[] = "hi";
@@ -905,14 +992,22 @@ int main(void){
 	initializeHOPE();
     init_Interrupts();
 
+    uint8_t resetButtonSW4 = 1;
+
     while (1)
     {
+    	resetButtonSW4 = (GPIO_ReadValue(1) >> 31) & 0x01; // SW4 polling mode
+    	if (resetButtonSW4 == 0) {
+    		resetExplorer();
+    	}
+
     	genericTasks();
     	if(OPERATION_MODE == EXPLORER_MODE){
     		explorerTasks();
     	} else {
     		survivalTasks();
     	}
+
     }
 }
 
