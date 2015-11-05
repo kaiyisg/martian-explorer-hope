@@ -443,7 +443,7 @@ void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
-void rgbBlinky (void) {
+void rgbBlinky(void) {
 	if (OPERATION_MODE == EXPLORER_MODE) {
 		new_rgb_setLeds(INDICATOR_EXPLORER); // blue
 	} else {
@@ -464,6 +464,8 @@ void init_Speaker(void) {
     GPIO_ClearValue(0, 1<<28); //LM4811-up/dn
     GPIO_ClearValue(2, 1<<13); //LM4811-shutdn
 }
+
+void resetExplorer(void)
 
 /* ############################################################# */
 /* ################### INITIALIZING TIMER ###################### */
