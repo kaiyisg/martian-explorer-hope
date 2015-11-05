@@ -565,6 +565,7 @@ void EINT3_IRQHandler(void) {
 			printf("flash end at: %" PRIu32 "ms\n",a);
 			fflush(stdout);
 			if (flashEnd - flashBeginning < 500) {
+				printf("+1\n");
 				NEW_LIGHTNING_FLAG = 1; // push new value to recentFlashes[]
 			}
 
