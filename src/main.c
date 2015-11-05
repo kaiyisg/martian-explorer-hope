@@ -56,8 +56,10 @@
 static uint32_t CURRENT_TIME = 0;
 static uint32_t SEGMENT_DISPLAY = '0';
 
-static const char ENTER_SURVIVAL_MESSAGE[] = "Lightning Detected. Scheduled Telemetry is Temporarily Suspended.\r\n";
-static const char EXIT_SURVIVAL_MESSAGE[] = "Lightning Has Subsided. Scheduled Telemetry Will Now Resume.\r\n";
+static const char ENTER_SURVIVAL_MESSAGE[] =
+		"Lightning Detected. Scheduled Telemetry is Temporarily Suspended.\r\n";
+static const char EXIT_SURVIVAL_MESSAGE[] =
+		"Lightning Has Subsided. Scheduled Telemetry Will Now Resume.\r\n";
 
 /* ############################################################# */
 /* ##################### GLOBAL CONSTANTS ###################### */
@@ -93,28 +95,131 @@ static int RGB_ON = 0;
 // FIFO Array containing timestamp of last 9 lightning flashes
 // first element is newest value, last element is oldest
 static uint32_t recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
-static int recentFlashesStackPointer = -1; // keeps track of how many flashes in past LIGHTNING_TIME_WINDOW
+
+// keeps track of how many flashes in past LIGHTNING_TIME_WINDOW
+static int recentFlashesStackPointer = -1;
+
 static int recentFlashesSize = sizeof(recentFlashes)/sizeof(recentFlashes[0]);
 
-// Timestamp checking beginning and end interrupt of each lightning flash that is > LIGHTNING_THRESHOLD
+// Timestamp checking beginning and end interrupt of each
+// lightning flash that is > LIGHTNING_THRESHOLD
 // Lightning flash only counted if flashEnd-flashBeginning<500ms
 static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
 static int aboveThreshold = 0;
 
 /* ############################################################# */
-/* ################# INTERRUPT HANDLER FLAGS ################### */
+/* ############## INITIALIZING SSP, I2C, GPIO ################## */
 /* ############################################################# */
 
-static int STOP_LED_COUNTDOWN = 0; // resets and stops led countdown in survival mode until < LIGHTNING_MONITORING
+static void init_ssp(void)
+{
+	SSP_CFG_Type SSP_ConfigStruct;
+	PINSEL_CFG_Type PinCfg;
+
+	/*
+	 * Initialize SPI pin connect
+	 * P0.7 - SCK;
+	 * P0.8 - MISO
+	 * P0.9 - MOSI
+	 * P2.2 - SSEL - used as GPIO
+	 */
+	PinCfg.Funcnum = 2;
+	PinCfg.OpenDrain = 0;
+	PinCfg.Pinmode = 0;
+	PinCfg.Portnum = 0;
+	PinCfg.Pinnum = 7;
+	PINSEL_ConfigPin(&PinCfg);
+	PinCfg.Pinnum = 8;
+	PINSEL_ConfigPin(&PinCfg);
+	PinCfg.Pinnum = 9;
+	PINSEL_ConfigPin(&PinCfg);
+	PinCfg.Funcnum = 0;
+	PinCfg.Portnum = 2;
+	PinCfg.Pinnum = 2;
+	PINSEL_ConfigPin(&PinCfg);
+
+	SSP_ConfigStructInit(&SSP_ConfigStruct);
+
+	// Initialize SSP peripheral with parameter given in structure above
+	SSP_Init(LPC_SSP1, &SSP_ConfigStruct);
+
+	// Enable SSP peripheral
+	SSP_Cmd(LPC_SSP1, ENABLE);
+}
+
+static void init_i2c(void)
+{
+	PINSEL_CFG_Type PinCfg;
+
+	/* Initialize I2C2 pin connect */
+	PinCfg.Funcnum = 2;
+	PinCfg.Pinnum = 10;
+	PinCfg.Portnum = 0;
+	PINSEL_ConfigPin(&PinCfg);
+	PinCfg.Pinnum = 11;
+	PINSEL_ConfigPin(&PinCfg);
+
+	// Initialize I2C peripheral
+	I2C_Init(LPC_I2C2, 100000);
+
+	/* Enable I2C1 operation */
+	I2C_Cmd(LPC_I2C2, ENABLE);
+}
+
+static void init_GPIO(void)
+{
+	// initialize SW4 (default config)
+	PINSEL_CFG_Type PinCfg;
+
+	PinCfg.Funcnum = 0;
+	PinCfg.OpenDrain = 0;
+	PinCfg.Pinmode = 0;
+	PinCfg.Portnum = 1;
+	PinCfg.Pinnum = 31;
+	PINSEL_ConfigPin(&PinCfg);
+
+	GPIO_SetDir(1, 1<<31, 0);
+
+	// init red and blue rgb to output
+    GPIO_SetDir( 2, 1, 1 );
+    GPIO_SetDir( 0, (1<<26), 1 );
+}
+
+void pinsel_uart3(void) {
+	PINSEL_CFG_Type PinCfg;
+	PinCfg.Funcnum = 2;
+	PinCfg.Pinnum = 0;
+	PinCfg.Portnum = 0;
+	PINSEL_ConfigPin(&PinCfg);
+	PinCfg.Pinnum = 1;
+	PINSEL_ConfigPin(&PinCfg);
+}
+
+void init_uart(void){
+	UART_CFG_Type uartCfg;
+	uartCfg.Baud_rate = 115200;
+	uartCfg.Databits = UART_DATABIT_8;
+	uartCfg.Parity =UART_PARITY_NONE;
+	uartCfg.Stopbits = UART_STOPBIT_1;
+
+	pinsel_uart3();
+
+	UART_Init(LPC_UART3, &uartCfg);
+	UART_TxCmd(LPC_UART3,ENABLE);
+}
+
+/* ############################################################# */
+/* ################## INITIALIZING INTERRUPTS ################## */
+/* ############################################################# */
+
+//Interupt handler flags
+// resets and stops led countdown in survival mode until < LIGHTNING_MONITORING
+static int STOP_LED_COUNTDOWN = 0;
 static int SW3_FLAG = 0;
 static int SAMPLING_FLAG = 0;
 static int NEW_LIGHTNING_FLAG = 0;
 static int UPDATE7SEG_FLAG = 0;
-
-/* ############################################################# */
-/* ############### INTERRUPT PRIORITY SETTING ################## */
-/* ############################################################# */
 
 void init_Priority(void){
 
@@ -149,6 +254,100 @@ void init_Priority(void){
 	NVIC_EnableIRQ(TIMER3_IRQn);
 }
 
+void init_Interrupts(void) {
+
+    // Setup Interrupt for Light Sensor
+    light_setRange(LIGHT_RANGE_4000); // sensing up to 3892 lux
+    light_setIrqInCycles(LIGHT_CYCLE_1);
+    light_clearIrqStatus();
+    light_enable();
+
+    // Determine initial light conditions
+    uint32_t initial_light_value = light_read();
+    if (initial_light_value > LIGHTNING_THRESHOLD) {
+    	// Initialize interrupt to trigger on falling below threshold
+    	aboveThreshold = 1;
+    	light_setLoThreshold(LIGHTNING_THRESHOLD);
+    	light_setHiThreshold(RANGE_K2-1); // disable high threshold
+    } else {
+        // Initialize interrupt to trigger on exceeding threshold
+    	aboveThreshold = 0;
+        light_setHiThreshold(LIGHTNING_THRESHOLD);
+        light_setLoThreshold(0); // disable low threshold
+    }
+
+    LPC_GPIOINT->IO2IntEnF |= 1 << 5; // light sensor 3000 lux interrupt (P2.5)
+    LPC_GPIOINT->IO2IntEnF |= 1 << 10; // SW3 (P2.10)
+
+	enableTimer(RGB, 1000); // RGB will blink throughout operation at 1000ms interval
+	enableTimer(SAMPLING, 2000);
+	enableTimer(PCA9532, 250);
+}
+
+void TIMER1_IRQHandler(void){ // PCA9532 Timer
+	if (OPERATION_MODE == SURVIVAL_MODE && STOP_LED_COUNTDOWN == 0) {
+		ledOn = ledOn >> 1; // turn off one led by right shifting bit pattern
+		pca9532_setLeds(ledOn, 0xffff);
+	}
+	TIM_ClearIntPending(LPC_TIM1,0);
+}
+
+void TIMER2_IRQHandler(void){ // RGB timer
+	rgbBlinky();
+	TIM_ClearIntPending(LPC_TIM2,0);
+}
+
+void TIMER3_IRQHandler(void){ // Sampling Timer
+	SAMPLING_FLAG = 1;
+	TIM_ClearIntPending(LPC_TIM3,0);
+}
+
+void EINT3_IRQHandler(void) {
+	if ((LPC_GPIOINT->IO2IntStatF) >> 5 & 0x1) { // Light Sensor Interrupt
+		LPC_GPIOINT->IO2IntClr = (1<<5);
+		light_clearIrqStatus();
+
+		if (aboveThreshold) { // Interrupt indicates light reading went below threshold
+			aboveThreshold = 0;
+			// Sense for threshold exceed again
+			light_setHiThreshold(LIGHTNING_THRESHOLD);
+			light_setLoThreshold(0); // disable low threshold
+
+			if (OPERATION_MODE == SURVIVAL_MODE) {
+				STOP_LED_COUNTDOWN = 0;
+			}
+			flashEnd = getMsTicks();
+			uint32_t a=flashEnd;
+			printf("flash end at: %" PRIu32 "ms\n",a);
+			fflush(stdout);
+			if (flashEnd - flashBeginning < 500) {
+				NEW_LIGHTNING_FLAG = 1; // push new value to recentFlashes[]
+			}
+
+		} else { // Interrupt indicates light reading exceeded threshold
+			aboveThreshold = 1;
+			// Sense for fall below threshold
+			light_setLoThreshold(LIGHTNING_THRESHOLD);
+			light_setHiThreshold(RANGE_K2-1); // disable high threshold
+
+			flashBeginning = getMsTicks();
+			uint32_t a=flashBeginning;
+			printf("flash begin at: %" PRIu32 "ms\n",a);
+			fflush(stdout);
+			if (OPERATION_MODE == SURVIVAL_MODE) {
+				STOP_LED_COUNTDOWN = 1;
+				ledOn = 0xffff; // reset countdown sequence
+				pca9532_setLeds(ledOn, 0xffff);
+			}
+		}
+	}
+
+	if ((LPC_GPIOINT->IO2IntStatF >> 10) & 0x1) { // SW3 interrupt
+		LPC_GPIOINT->IO2IntClr = (1<<10);
+		SW3_FLAG = 1;
+	}
+}
+
 /* ############################################################# */
 /* ################## DEFINING AND SYSTICK ##################### */
 /* ############################################################# */
@@ -162,27 +361,6 @@ void SysTick_Handler(void){
 uint32_t getMsTicks()
 {
 	return msTicks;
-}
-
-/* ############################################################# */
-/* ########### DEFINING SWITCHING ON AND OFF RGB ############### */
-/* ############################################################# */
-
-void new_rgb_setLeds (uint8_t ledMask) // self defined function to toggle red and blue RGB
-{
-	if (RGB_ON == 1) {
-		RGB_ON = 0; // toggle off
-		GPIO_ClearValue( 2, 1);
-		GPIO_ClearValue( 0, (1<<26) );
-	} else {
-		RGB_ON = 1; // toggle on
-		if ((ledMask & RGB_RED) != 0) {
-			GPIO_SetValue( 2, 1);
-		}
-		if ((ledMask & RGB_BLUE) != 0) {
-			GPIO_SetValue( 0, (1<<26));
-		}
-	}
 }
 
 /* ############################################################# */
@@ -299,107 +477,6 @@ static uint8_t * song = (uint8_t*)"C2.C2,D4,C4,F4,E8,";
         //"D4,B4,B4,A4,A4,G4,E4,D4.D2,E4,E4,A4,F4,D8.D4,d4,d4,c4,c4,B4,G4,E4.E2,F4,F4,A4,A4,G8,";
 
 /* ############################################################# */
-/* ############## INITIALIZING SSP, I2C, GPIO ################## */
-/* ############################################################# */
-
-static void init_ssp(void)
-{
-	SSP_CFG_Type SSP_ConfigStruct;
-	PINSEL_CFG_Type PinCfg;
-
-	/*
-	 * Initialize SPI pin connect
-	 * P0.7 - SCK;
-	 * P0.8 - MISO
-	 * P0.9 - MOSI
-	 * P2.2 - SSEL - used as GPIO
-	 */
-	PinCfg.Funcnum = 2;
-	PinCfg.OpenDrain = 0;
-	PinCfg.Pinmode = 0;
-	PinCfg.Portnum = 0;
-	PinCfg.Pinnum = 7;
-	PINSEL_ConfigPin(&PinCfg);
-	PinCfg.Pinnum = 8;
-	PINSEL_ConfigPin(&PinCfg);
-	PinCfg.Pinnum = 9;
-	PINSEL_ConfigPin(&PinCfg);
-	PinCfg.Funcnum = 0;
-	PinCfg.Portnum = 2;
-	PinCfg.Pinnum = 2;
-	PINSEL_ConfigPin(&PinCfg);
-
-	SSP_ConfigStructInit(&SSP_ConfigStruct);
-
-	// Initialize SSP peripheral with parameter given in structure above
-	SSP_Init(LPC_SSP1, &SSP_ConfigStruct);
-
-	// Enable SSP peripheral
-	SSP_Cmd(LPC_SSP1, ENABLE);
-}
-
-static void init_i2c(void)
-{
-	PINSEL_CFG_Type PinCfg;
-
-	/* Initialize I2C2 pin connect */
-	PinCfg.Funcnum = 2;
-	PinCfg.Pinnum = 10;
-	PinCfg.Portnum = 0;
-	PINSEL_ConfigPin(&PinCfg);
-	PinCfg.Pinnum = 11;
-	PINSEL_ConfigPin(&PinCfg);
-
-	// Initialize I2C peripheral
-	I2C_Init(LPC_I2C2, 100000);
-
-	/* Enable I2C1 operation */
-	I2C_Cmd(LPC_I2C2, ENABLE);
-}
-
-static void init_GPIO(void)
-{
-	// initialize SW4 (default config)
-	PINSEL_CFG_Type PinCfg;
-
-	PinCfg.Funcnum = 0;
-	PinCfg.OpenDrain = 0;
-	PinCfg.Pinmode = 0;
-	PinCfg.Portnum = 1;
-	PinCfg.Pinnum = 31;
-	PINSEL_ConfigPin(&PinCfg);
-
-	GPIO_SetDir(1, 1<<31, 0);
-
-	// init red and blue rgb to output
-    GPIO_SetDir( 2, 1, 1 );
-    GPIO_SetDir( 0, (1<<26), 1 );
-}
-
-void pinsel_uart3(void) {
-	PINSEL_CFG_Type PinCfg;
-	PinCfg.Funcnum = 2;
-	PinCfg.Pinnum = 0;
-	PinCfg.Portnum = 0;
-	PINSEL_ConfigPin(&PinCfg);
-	PinCfg.Pinnum = 1;
-	PINSEL_ConfigPin(&PinCfg);
-}
-
-void init_uart(void){
-	UART_CFG_Type uartCfg;
-	uartCfg.Baud_rate = 115200;
-	uartCfg.Databits = UART_DATABIT_8;
-	uartCfg.Parity =UART_PARITY_NONE;
-	uartCfg.Stopbits = UART_STOPBIT_1;
-
-	pinsel_uart3();
-
-	UART_Init(LPC_UART3, &uartCfg);
-	UART_TxCmd(LPC_UART3,ENABLE);
-}
-
-/* ############################################################# */
 /* ############ HELPER FUNCTIONS FOR PERIPHERALS ############### */
 /* ############################################################# */
 
@@ -441,6 +518,23 @@ void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 	oled_putString(0,0,(uint8_t*)lightArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,10,(uint8_t*)tempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+}
+
+// Function to toggle red and blue LEDs
+void new_rgb_setLeds (uint8_t ledMask) {
+	if (RGB_ON == 1) {
+		RGB_ON = 0; // toggle off
+		GPIO_ClearValue( 2, 1);
+		GPIO_ClearValue( 0, (1<<26) );
+	} else {
+		RGB_ON = 1; // toggle on
+		if ((ledMask & RGB_RED) != 0) {
+			GPIO_SetValue( 2, 1);
+		}
+		if ((ledMask & RGB_BLUE) != 0) {
+			GPIO_SetValue( 0, (1<<26));
+		}
+	}
 }
 
 void rgbBlinky (void) {
@@ -522,104 +616,6 @@ static void initializeHOPE(void) {
 	}
 	SEGMENT_DISPLAY = NULL;
 	led7seg_setChar(SEGMENT_DISPLAY, FALSE); // clear 7 segment display
-}
-
-/* ############################################################# */
-/* ################## INITIALIZING INTERRUPTS ################## */
-/* ############################################################# */
-
-void TIMER1_IRQHandler(void){ // PCA9532 Timer
-	if (OPERATION_MODE == SURVIVAL_MODE && STOP_LED_COUNTDOWN == 0) {
-		ledOn = ledOn >> 1; // turn off one led by right shifting bit pattern
-		pca9532_setLeds(ledOn, 0xffff);
-	}
-	TIM_ClearIntPending(LPC_TIM1,0);
-}
-
-void TIMER2_IRQHandler(void){ // RGB timer
-	rgbBlinky();
-	TIM_ClearIntPending(LPC_TIM2,0);
-}
-
-void TIMER3_IRQHandler(void){ // Sampling Timer
-	SAMPLING_FLAG = 1;
-	TIM_ClearIntPending(LPC_TIM3,0);
-}
-
-void EINT3_IRQHandler(void) {
-	if ((LPC_GPIOINT->IO2IntStatF) >> 5 & 0x1) { // Light Sensor Interrupt
-		LPC_GPIOINT->IO2IntClr = (1<<5);
-		light_clearIrqStatus();
-
-		if (aboveThreshold) { // Interrupt indicates light reading went below threshold
-			aboveThreshold = 0;
-			// Sense for threshold exceed again
-			light_setHiThreshold(LIGHTNING_THRESHOLD);
-			light_setLoThreshold(0); // disable low threshold
-
-			if (OPERATION_MODE == SURVIVAL_MODE) {
-				STOP_LED_COUNTDOWN = 0;
-			}
-			flashEnd = getMsTicks();
-			uint32_t a=flashEnd;
-			printf("flash end at: %" PRIu32 "ms\n",a);
-			fflush(stdout);
-			if (flashEnd - flashBeginning < 500) {
-				NEW_LIGHTNING_FLAG = 1; // push new value to recentFlashes[]
-			}
-
-		} else { // Interrupt indicates light reading exceeded threshold
-			aboveThreshold = 1;
-			// Sense for fall below threshold
-			light_setLoThreshold(LIGHTNING_THRESHOLD);
-			light_setHiThreshold(RANGE_K2-1); // disable high threshold
-
-			flashBeginning = getMsTicks();
-			uint32_t a=flashBeginning;
-			printf("flash begin at: %" PRIu32 "ms\n",a);
-			fflush(stdout);
-			if (OPERATION_MODE == SURVIVAL_MODE) {
-				STOP_LED_COUNTDOWN = 1;
-				ledOn = 0xffff; // reset countdown sequence
-				pca9532_setLeds(ledOn, 0xffff);
-			}
-		}
-	}
-
-	if ((LPC_GPIOINT->IO2IntStatF >> 10) & 0x1) { // SW3 interrupt
-		LPC_GPIOINT->IO2IntClr = (1<<10);
-		SW3_FLAG = 1;
-	}
-}
-
-void init_Interrupts(void) {
-
-    // Setup Interrupt for Light Sensor
-    light_setRange(LIGHT_RANGE_4000); // sensing up to 3892 lux
-    light_setIrqInCycles(LIGHT_CYCLE_1);
-    light_clearIrqStatus();
-    light_enable();
-
-    // Determine initial light conditions
-    uint32_t initial_light_value = light_read();
-    if (initial_light_value > LIGHTNING_THRESHOLD) {
-    	// Initialize interrupt to trigger on falling below threshold
-    	aboveThreshold = 1;
-    	light_setLoThreshold(LIGHTNING_THRESHOLD);
-    	light_setHiThreshold(RANGE_K2-1); // disable high threshold
-    } else {
-        // Initialize interrupt to trigger on exceeding threshold
-    	aboveThreshold = 0;
-        light_setHiThreshold(LIGHTNING_THRESHOLD);
-        light_setLoThreshold(0); // disable low threshold
-    }
-
-    LPC_GPIOINT->IO2IntEnF |= 1 << 5; // light sensor 3000 lux interrupt (P2.5)
-    LPC_GPIOINT->IO2IntEnF |= 1 << 10; // SW3 (P2.10)
-
-	enableTimer(RGB, 1000); // RGB will blink throughout operation at 1000ms interval
-	enableTimer(SAMPLING, 2000);
-	enableTimer(PCA9532, 250);
 }
 
 /* ############################################################# */
