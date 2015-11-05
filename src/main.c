@@ -346,37 +346,6 @@ void init_Interrupts(void){
 	enableTimer(PCA9532, 250);
 }
 
-void TIMER1_IRQHandler(void){ // PCA9532 Timer
-	if (OPERATION_MODE == SURVIVAL_MODE && STOP_LED_COUNTDOWN == 0) {
-		ledOn = ledOn >> 1; // turn off one led by right shifting bit pattern
-		pca9532_setLeds(ledOn, 0xffff);
-	}
-	TIM_ClearIntPending(LPC_TIM1,0);
-}
-
-void TIMER2_IRQHandler(void){ // RGB timer
-	rgbBlinky();
-	TIM_ClearIntPending(LPC_TIM2,0);
-}
-
-void TIMER3_IRQHandler(void){ // Sampling Timer
-	SAMPLING_FLAG = 1;
-	TIM_ClearIntPending(LPC_TIM3,0);
-}
-
-void EINT3_IRQHandler(void){
-	if ((LPC_GPIOINT->IO2IntStatF) >> 5 & 0x1) { // Light Sensor Interrupt
-		LPC_GPIOINT->IO2IntClr = (1<<5);
-		light_clearIrqStatus();
-		lightning_Interrupt_Handler();
-	}
-
-	if ((LPC_GPIOINT->IO2IntStatF >> 10) & 0x1) { // SW3 interrupt
-		LPC_GPIOINT->IO2IntClr = (1<<10);
-		SW3_FLAG = 1;
-	}
-}
-
 void lightning_Interrupt_Handler(void){
 	if (aboveThreshold) { // Interrupt indicates light reading went below threshold
 		aboveThreshold = 0;
@@ -410,6 +379,37 @@ void lightning_Interrupt_Handler(void){
 			ledOn = 0xffff; // reset countdown sequence
 			pca9532_setLeds(ledOn, 0xffff);
 		}
+	}
+}
+
+void TIMER1_IRQHandler(void){ // PCA9532 Timer
+	if (OPERATION_MODE == SURVIVAL_MODE && STOP_LED_COUNTDOWN == 0) {
+		ledOn = ledOn >> 1; // turn off one led by right shifting bit pattern
+		pca9532_setLeds(ledOn, 0xffff);
+	}
+	TIM_ClearIntPending(LPC_TIM1,0);
+}
+
+void TIMER2_IRQHandler(void){ // RGB timer
+	rgbBlinky();
+	TIM_ClearIntPending(LPC_TIM2,0);
+}
+
+void TIMER3_IRQHandler(void){ // Sampling Timer
+	SAMPLING_FLAG = 1;
+	TIM_ClearIntPending(LPC_TIM3,0);
+}
+
+void EINT3_IRQHandler(void){
+	if ((LPC_GPIOINT->IO2IntStatF) >> 5 & 0x1) { // Light Sensor Interrupt
+		LPC_GPIOINT->IO2IntClr = (1<<5);
+		light_clearIrqStatus();
+		lightning_Interrupt_Handler();
+	}
+
+	if ((LPC_GPIOINT->IO2IntStatF >> 10) & 0x1) { // SW3 interrupt
+		LPC_GPIOINT->IO2IntClr = (1<<10);
+		SW3_FLAG = 1;
 	}
 }
 
