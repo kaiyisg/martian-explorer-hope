@@ -39,6 +39,7 @@
 #include "led7seg.h"
 #include "light.h"
 
+
 /* ############################################################# */
 /* ################# ASSIGNMENT SPECIFICATIONS ################# */
 /* ############################################################# */
@@ -225,7 +226,7 @@ static void init_i2c(void)
 
 static void init_GPIO(void)
 {
-	// initialize SW4 (default config)
+	// initialize SW4
 	PINSEL_CFG_Type PinCfg;
 
 	PinCfg.Funcnum = 0;
@@ -234,8 +235,13 @@ static void init_GPIO(void)
 	PinCfg.Portnum = 1;
 	PinCfg.Pinnum = 31;
 	PINSEL_ConfigPin(&PinCfg);
-
 	GPIO_SetDir(1, 1<<31, 0);
+
+	// initialize SW3
+	PinCfg.Portnum = 2;
+	PinCfg.Pinnum = 10;
+	PINSEL_ConfigPin(&PinCfg);
+	GPIO_SetDir(2, 1<<10, 0);
 
 	// init red and blue rgb to output
     GPIO_SetDir( 2, 1, 1 );
@@ -362,40 +368,7 @@ void EINT3_IRQHandler(void){
 	if ((LPC_GPIOINT->IO2IntStatF) >> 5 & 0x1) { // Light Sensor Interrupt
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
-
-		if (aboveThreshold) { // Interrupt indicates light reading went below threshold
-			aboveThreshold = 0;
-			// Sense for threshold exceed again
-			light_setHiThreshold(LIGHTNING_THRESHOLD);
-			light_setLoThreshold(0); // disable low threshold
-
-			if (OPERATION_MODE == SURVIVAL_MODE) {
-				STOP_LED_COUNTDOWN = 0;
-			}
-			flashEnd = getMsTicks();
-			uint32_t a=flashEnd;
-			printf("flash end at: %" PRIu32 "ms\n",a);
-			fflush(stdout);
-			if (flashEnd - flashBeginning < 500) {
-				NEW_LIGHTNING_FLAG = 1; // push new value to recentFlashes[]
-			}
-
-		} else { // Interrupt indicates light reading exceeded threshold
-			aboveThreshold = 1;
-			// Sense for fall below threshold
-			light_setLoThreshold(LIGHTNING_THRESHOLD);
-			light_setHiThreshold(RANGE_K2-1); // disable high threshold
-
-			flashBeginning = getMsTicks();
-			uint32_t a=flashBeginning;
-			printf("flash begin at: %" PRIu32 "ms\n",a);
-			fflush(stdout);
-			if (OPERATION_MODE == SURVIVAL_MODE) {
-				STOP_LED_COUNTDOWN = 1;
-				ledOn = 0xffff; // reset countdown sequence
-				pca9532_setLeds(ledOn, 0xffff);
-			}
-		}
+		lightning_Interrupt_Handler();
 	}
 
 	if ((LPC_GPIOINT->IO2IntStatF >> 10) & 0x1) { // SW3 interrupt
@@ -404,6 +377,41 @@ void EINT3_IRQHandler(void){
 	}
 }
 
+void lightning_Interrupt_Handler(void){
+	if (aboveThreshold) { // Interrupt indicates light reading went below threshold
+		aboveThreshold = 0;
+		// Sense for threshold exceed again
+		light_setHiThreshold(LIGHTNING_THRESHOLD);
+		light_setLoThreshold(0); // disable low threshold
+
+		if (OPERATION_MODE == SURVIVAL_MODE) {
+			STOP_LED_COUNTDOWN = 0;
+		}
+		flashEnd = getMsTicks();
+		uint32_t a=flashEnd;
+		printf("flash end at: %" PRIu32 "ms\n",a);
+		fflush(stdout);
+		if (flashEnd - flashBeginning < 500) {
+			NEW_LIGHTNING_FLAG = 1; // push new value to recentFlashes[]
+		}
+
+	} else { // Interrupt indicates light reading exceeded threshold
+		aboveThreshold = 1;
+		// Sense for fall below threshold
+		light_setLoThreshold(LIGHTNING_THRESHOLD);
+		light_setHiThreshold(RANGE_K2-1); // disable high threshold
+
+		flashBeginning = getMsTicks();
+		uint32_t a=flashBeginning;
+		printf("flash begin at: %" PRIu32 "ms\n",a);
+		fflush(stdout);
+		if (OPERATION_MODE == SURVIVAL_MODE) {
+			STOP_LED_COUNTDOWN = 1;
+			ledOn = 0xffff; // reset countdown sequence
+			pca9532_setLeds(ledOn, 0xffff);
+		}
+	}
+}
 
 /* ############################################################# */
 /* ######### DEFINING FUNCTION AND NOTES FOR SPEAKER ########### */
@@ -634,9 +642,12 @@ void resetExplorer(void){ // reset all global variables and peripherals to initi
 	SAMPLING_FLAG = 0;
 	NEW_LIGHTNING_FLAG = 0;
 	UPDATE7SEG_FLAG = 0;
+	SEGMENT_DISPLAY = '0';
 
 	/* RESET PERIPHERALS */
-	pca9532_setLeds(ledOn, 0xffff);
+	pca9532_setLeds(0x0000, 0xffff);
+	led7seg_setChar(SEGMENT_DISPLAY, FALSE);
+	oled_clearScreen(OLED_COLOR_BLACK);
 }
 
 /* ############################################################# */
@@ -806,14 +817,22 @@ int main(void){
 	initializeHOPE();
     init_Interrupts();
 
+    uint8_t resetButtonSW4 = 1;
+
     while (1)
     {
+    	resetButtonSW4 = (GPIO_ReadValue(1) >> 31) & 0x01; // SW4 polling mode
+    	if (resetButtonSW4 == 0) {
+    		resetExplorer();
+    	}
+
     	genericTasks();
     	if(OPERATION_MODE == EXPLORER_MODE){
     		explorerTasks();
     	} else {
     		survivalTasks();
     	}
+
     }
 }
 
