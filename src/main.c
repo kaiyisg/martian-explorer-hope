@@ -646,7 +646,7 @@ void resetExplorer(void){ // reset all global variables and peripherals to initi
 
 	/* RESET PERIPHERALS */
 	pca9532_setLeds(0x0000, 0xffff);
-	led7seg_setChar(SEGMENT_DISPLAY, FALSE);
+	led7seg_setChar(NULL, FALSE);
 	oled_clearScreen(OLED_COLOR_BLACK);
 }
 
@@ -761,17 +761,9 @@ static void genericTasks(void){
 		int32_t *xyz_values;
 		xyz_values = readAccelerometer();
 		printValues(light_value, temp_value, xyz_values); // print current sensor readings
-		static char msg[50] ="L";
-		strcat(msg,(int)light_value);
-		strcat(msg,"_T");
-		strcat(msg,(int)temp_value);
-		strcat(msg,"_AX");
-		strcat(msg,(int) *(xyz_values));
-		strcat(msg,"_AY");
-		strcat(msg,(int) *(xyz_values+1));
-		strcat(msg,"_AZ");
-		strcat(msg,(int) *(xyz_values+2));
-		strcat(msg,"\r\n");
+		char msg[50];
+		snprintf(msg,sizeof(msg),"L%d_T%d_AX%d_AY%d_AZ%d\r\n",(int)light_value,(int)temp_value,
+				(int)*(xyz_values),(int)*(xyz_values+1),(int)*(xyz_values+2));
 		UART_Send(LPC_UART3, (uint8_t *)msg, strlen(msg), BLOCKING); // send sensor readings to HOME
 	}
 }
