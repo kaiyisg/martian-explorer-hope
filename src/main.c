@@ -520,6 +520,7 @@ void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
+<<<<<<< HEAD
 // Function to toggle red and blue LEDs
 void new_rgb_setLeds (uint8_t ledMask) {
 	if (RGB_ON == 1) {
@@ -538,6 +539,9 @@ void new_rgb_setLeds (uint8_t ledMask) {
 }
 
 void rgbBlinky (void) {
+=======
+void rgbBlinky(void) {
+>>>>>>> origin/master
 	if (OPERATION_MODE == EXPLORER_MODE) {
 		new_rgb_setLeds(INDICATOR_EXPLORER); // blue
 	} else {
@@ -558,6 +562,8 @@ void init_Speaker(void) {
     GPIO_ClearValue(0, 1<<28); //LM4811-up/dn
     GPIO_ClearValue(2, 1<<13); //LM4811-shutdn
 }
+
+void resetExplorer(void)
 
 /* ############################################################# */
 /* ################### INITIALIZING TIMER ###################### */
@@ -619,6 +625,108 @@ static void initializeHOPE(void) {
 }
 
 /* ############################################################# */
+<<<<<<< HEAD
+=======
+/* ################## INITIALIZING INTERRUPTS ################## */
+/* ############################################################# */
+
+void TIMER1_IRQHandler(void){ // PCA9532 Timer
+	if (OPERATION_MODE == SURVIVAL_MODE && STOP_LED_COUNTDOWN == 0) {
+		ledOn = ledOn >> 1; // turn off one led by right shifting bit pattern
+		pca9532_setLeds(ledOn, 0xffff);
+	}
+	TIM_ClearIntPending(LPC_TIM1,0);
+}
+
+void TIMER2_IRQHandler(void){ // RGB timer
+	rgbBlinky();
+	TIM_ClearIntPending(LPC_TIM2,0);
+}
+
+void TIMER3_IRQHandler(void){ // Sampling Timer
+	SAMPLING_FLAG = 1;
+	TIM_ClearIntPending(LPC_TIM3,0);
+}
+
+void EINT3_IRQHandler(void) {
+	if ((LPC_GPIOINT->IO2IntStatF) >> 5 & 0x1) { // Light Sensor Interrupt
+		LPC_GPIOINT->IO2IntClr = (1<<5);
+		light_clearIrqStatus();
+
+		if (aboveThreshold) { // Interrupt indicates light reading went below threshold
+			aboveThreshold = 0;
+			// Sense for threshold exceed again
+			light_setHiThreshold(LIGHTNING_THRESHOLD);
+			light_setLoThreshold(0); // disable low threshold
+
+			if (OPERATION_MODE == SURVIVAL_MODE) {
+				STOP_LED_COUNTDOWN = 0;
+			}
+			flashEnd = getMsTicks();
+			uint32_t a=flashEnd;
+			printf("flash end at: %" PRIu32 "ms\n",a);
+			fflush(stdout);
+			if (flashEnd - flashBeginning < 500) {
+				printf("+1\n");
+				NEW_LIGHTNING_FLAG = 1; // push new value to recentFlashes[]
+			}
+
+		} else { // Interrupt indicates light reading exceeded threshold
+			aboveThreshold = 1;
+			// Sense for fall below threshold
+			light_setLoThreshold(LIGHTNING_THRESHOLD);
+			light_setHiThreshold(RANGE_K2-1); // disable high threshold
+
+			flashBeginning = getMsTicks();
+			uint32_t a=flashBeginning;
+			printf("flash begin at: %" PRIu32 "ms\n",a);
+			fflush(stdout);
+			if (OPERATION_MODE == SURVIVAL_MODE) {
+				STOP_LED_COUNTDOWN = 1;
+				ledOn = 0xffff; // reset countdown sequence
+				pca9532_setLeds(ledOn, 0xffff);
+			}
+		}
+	}
+
+	if ((LPC_GPIOINT->IO2IntStatF >> 10) & 0x1) { // SW3 interrupt
+		LPC_GPIOINT->IO2IntClr = (1<<10);
+		SW3_FLAG = 1;
+	}
+}
+
+void init_Interrupts(void) {
+
+    // Setup Interrupt for Light Sensor
+    light_setRange(LIGHT_RANGE_4000); // sensing up to 3892 lux
+    light_setIrqInCycles(LIGHT_CYCLE_1);
+    light_clearIrqStatus();
+    light_enable();
+
+    // Determine initial light conditions
+    uint32_t initial_light_value = light_read();
+    if (initial_light_value > LIGHTNING_THRESHOLD) {
+    	// Initialize interrupt to trigger on falling below threshold
+    	aboveThreshold = 1;
+    	light_setLoThreshold(LIGHTNING_THRESHOLD);
+    	light_setHiThreshold(RANGE_K2-1); // disable high threshold
+    } else {
+        // Initialize interrupt to trigger on exceeding threshold
+    	aboveThreshold = 0;
+        light_setHiThreshold(LIGHTNING_THRESHOLD);
+        light_setLoThreshold(0); // disable low threshold
+    }
+
+    LPC_GPIOINT->IO2IntEnF |= 1 << 5; // light sensor 3000 lux interrupt (P2.5)
+    LPC_GPIOINT->IO2IntEnF |= 1 << 10; // SW3 (P2.10)
+
+	enableTimer(RGB, 1000); // RGB will blink throughout operation at 1000ms interval
+	enableTimer(SAMPLING, 2000);
+	enableTimer(PCA9532, 250);
+}
+
+/* ############################################################# */
+>>>>>>> origin/master
 /* ##################### TASK HANDLERS ######################### */
 /* ############################################################# */
 
