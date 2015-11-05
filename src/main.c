@@ -522,6 +522,8 @@ static uint8_t * song = (uint8_t*)"C2.C2,D4,C4,F4,E8,";
 /* ############ HELPER FUNCTIONS FOR PERIPHERALS ############### */
 /* ############################################################# */
 
+
+
 static int32_t readTempSensor(void){
 	int32_t temperature = temp_read();
 	return temperature/10.0; // temperature in Celsius
@@ -640,22 +642,127 @@ void resetExplorer(void){ // reset all global variables and peripherals to initi
 }
 
 /* ############################################################# */
+/* ################## DEFINING OLED DISPLAY #################### */
+/* ############################################################# */
+
+void introDisplay(int hopePosition){
+
+	oled_clearScreen(OLED_COLOR_BLACK);
+	oled_putString(0,0,"====H.O.P.E.====",OLED_COLOR_BLACK,OLED_COLOR_WHITE);
+	oled_circle(45, 35, 15, OLED_COLOR_WHITE);
+
+	switch(hopePosition){
+	case 0:
+		oled_rect(40,10,50,20,OLED_COLOR_WHITE);
+		break;
+	case 1:
+		oled_rect(23,20,33,30,OLED_COLOR_WHITE);
+		break;
+	case 2:
+		oled_rect(23,38,33,48,OLED_COLOR_WHITE);
+		break;
+	case 3:
+		oled_rect(33,50,43,60,OLED_COLOR_WHITE);
+		break;
+	case 4:
+		oled_rect(47,50,57,60,OLED_COLOR_WHITE);
+		break;
+	case 5:
+		oled_rect(57,38,67,48,OLED_COLOR_WHITE);
+		break;
+	case 6:
+		oled_rect(57,20,67,30,OLED_COLOR_WHITE);
+		break;
+	default:
+		oled_rect(40,10,50,20,OLED_COLOR_WHITE);
+		break;
+	}
+}
+
+static int explorerMainDisplayMode = 1; //default setting
+
+//function to refresh the survival main display
+void explorerMainDisplay(int mode, int32_t light_value, int32_t temp_value, int32_t *xyz_values){
+	char lightTempArray[20];
+	char xyzArray[20];
+	sprintf(lightTempArray, "L%d_T%d", (int)light_value, (int)temp_value);
+	sprintf(xyzArray, "AX%d_AY%d_AZ%d", (int)*(xyz_values), (int)*(xyz_values+1),(int)*(xyz_values+2));
+
+	oled_putString(0,0,"====H.O.P.E.====",OLED_COLOR_BLACK,OLED_COLOR_WHITE);
+	oled_putString(0,10,(uint8_t*)lightTempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,30,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,50,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,60,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+
+	switch(mode){
+	case 1:
+		oled_putString(0,30,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	case 2:
+		oled_putString(0,40,"> Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	case 3:
+		oled_putString(0,50,"> Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	case 4:
+		oled_putString(0,60,"> Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	default:
+		oled_putString(0,30,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	}
+}
+
+//returns the mode that the explorer main should be in
+int explorerMainControl(int joystick_input){
+
+}
+
+void survivorDisplay(void){
+	char lightTempArray[20];
+	char xyzArray[20];
+	sprintf(lightTempArray, "LS_TS");
+	sprintf(xyzArray, "AXS_AYS_AZS");
+	oled_putString(0,0,"====H.O.P.E.====",OLED_COLOR_BLACK,OLED_COLOR_WHITE);
+	oled_putString(0,10,(uint8_t*)lightTempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+}
+
+/* ############################################################# */
 /* #################### INITIALIZING HOPE ###################### */
 /* ############################################################# */
 
 static void initializeHOPE(void){
+
+	int index = 0;
+	int oled_segment_display =0;
 	SEGMENT_DISPLAY = '0';
+
 	while (SEGMENT_DISPLAY != 'G') { // increment until segment displays 'F'
 		led7seg_setChar(SEGMENT_DISPLAY, FALSE); // display new incremented value
+
+		//showing oled display
+		if(oled_segment_display<=6){
+			introDisplay(oled_segment_display);
+		}else{
+			index=index+2; //to offset increase in oled_segment_display value
+			introDisplay(oled_segment_display-index);
+		}
+
 		Timer0_Wait(1000); // 1s interval
 		if (SEGMENT_DISPLAY == '6') {
 			SEGMENT_DISPLAY = 'A'; // change from number to alphabet
 		} else {
 			SEGMENT_DISPLAY += 1; // increment
+			oled_segment_display++;
 		}
+
 	}
 	SEGMENT_DISPLAY = NULL;
 	led7seg_setChar(SEGMENT_DISPLAY, FALSE); // clear 7 segment display
+	oled_clearScreen(OLED_COLOR_BLACK); //clear OLED screen
 }
 
 /* ############################################################# */
@@ -670,7 +777,7 @@ static void explorerTasks(void){
 		int32_t temp_value = readTempSensor();
 		int32_t *xyz_values;
 		xyz_values = readAccelerometer();
-		printValues(light_value, temp_value, xyz_values);
+		explorerMainDisplay(explorerMainDisplayMode, light_value, temp_value, xyz_values);
 		// TRANSMIT DATA TO HOME
 	}
 
@@ -730,16 +837,8 @@ static void genericTasks(void){
 	// CONDITION FOR SWITCHING TO SURVIVAL MODE
 	if ((recentFlashesStackPointer >= 2) && (OPERATION_MODE == EXPLORER_MODE)) {
 		OPERATION_MODE = SURVIVAL_MODE;
-    	char lightArray[20];
-    	char tempArray[20];
-    	char xyzArray[20];
-    	sprintf(lightArray, "LS");
-    	sprintf(tempArray, "TS");
-    	sprintf(xyzArray, "AXS_AYS_AZS");
-        oled_clearScreen(OLED_COLOR_BLACK);
-    	oled_putString(0,0,(uint8_t*)lightArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-    	oled_putString(0,10,(uint8_t*)tempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-    	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_clearScreen(OLED_COLOR_BLACK);
+		survivorDisplay();
     	UART_Send(LPC_UART3, (uint8_t *)ENTER_SURVIVAL_MESSAGE , strlen(ENTER_SURVIVAL_MESSAGE), BLOCKING);
 	}
 
