@@ -465,7 +465,41 @@ void init_Speaker(void) {
     GPIO_ClearValue(2, 1<<13); //LM4811-shutdn
 }
 
-void resetExplorer(void)
+void resetExplorer(void) { // reset all global variables and peripherals to initial values
+
+	OPERATION_MODE = EXPLORER_MODE;
+
+	/* Accelerometer Variables */
+	xoff = 0;
+	yoff = 0;
+	zoff = 0;
+
+    acc_read(&x, &y, &z);
+    xoff = 0;
+    yoff = 0;
+    zoff = 0-z;
+
+	ledOn = 0xffff; // pca9532 led bit pattern
+	RGB_ON = 0;
+
+	recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
+	recentFlashesStackPointer = -1; // keeps track of how many flashes in past LIGHTNING_TIME_WINDOW
+
+	// Timestamp checking beginning and end interrupt of each lightning flash that is > LIGHTNING_THRESHOLD
+	// Lightning flash only counted if flashEnd-flashBeginning<500ms
+	flashBeginning = 0;
+	flashEnd = 0;
+	aboveThreshold = 0;
+
+	/* RESET FLAGS */
+	STOP_LED_COUNTDOWN = 0; // resets and stops led countdown in survival mode until < LIGHTNING_MONITORING
+	SW3_FLAG = 0;
+	SAMPLING_FLAG = 0;
+	NEW_LIGHTNING_FLAG = 0;
+	UPDATE7SEG_FLAG = 0;
+
+	/* RESET PERIPHERALS */
+}
 
 /* ############################################################# */
 /* ################### INITIALIZING TIMER ###################### */
