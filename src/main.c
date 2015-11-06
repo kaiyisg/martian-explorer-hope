@@ -18,6 +18,8 @@
 //put into j36 - enable light sensor
 //j13 from BLEN to PIO2_9 - use SW3 interrupt
 //remove j23 jumper at PIO1_10 to green RGB - disable green RGB
+//remove j20 top two jumpers for UART
+//put jumper in j58
 
 //include brief summary of program functioning
 
@@ -303,6 +305,141 @@ void init_uart(void){
 	UART_TxCmd(LPC_UART3,ENABLE);
 }
 
+
+/* ############################################################# */
+/* ######### DEFINING FUNCTION AND NOTES FOR SPEAKER ########### */
+/* ############################################################# */
+
+#define NOTE_PIN_HIGH() GPIO_SetValue(0, 1<<26);
+#define NOTE_PIN_LOW()  GPIO_ClearValue(0, 1<<26);
+
+static uint32_t notes[] = {
+        2272, // A - 440 Hz
+        2024, // B - 494 Hz
+        3816, // C - 262 Hz
+        3401, // D - 294 Hz
+        3030, // E - 330 Hz
+        2865, // F - 349 Hz
+        2551, // G - 392 Hz
+        1136, // a - 880 Hz
+        1012, // b - 988 Hz
+        1912, // c - 523 Hz
+        1703, // d - 587 Hz
+        1517, // e - 659 Hz
+        1432, // f - 698 Hz
+        1275, // g - 784 Hz
+};
+
+static void playNote(uint32_t note, uint32_t durationMs) {
+
+    uint32_t t = 0;
+
+    if (note > 0) {
+
+        while (t < (durationMs*1000)) {
+            NOTE_PIN_HIGH();
+            Timer0_us_Wait(note / 2);
+            //delay32Us(0, note / 2);
+
+            NOTE_PIN_LOW();
+            Timer0_us_Wait(note / 2);
+            //delay32Us(0, note / 2);
+
+            t += note;
+        }
+    }
+    else {
+    	Timer0_Wait(durationMs);
+        //delay32Ms(0, durationMs);
+    }
+}
+
+static uint8_t changeNote(uint8_t note, uint8_t change){
+	if (change == HIGHER_NOTE) {
+		if (note != 'g') { // highest note is g
+			if (note == 'G') {
+				return 'a';
+			} else {
+				return note + 1;
+			}
+		}
+	} else if (change == LOWER_NOTE) {
+		if (note != 'A') { // lowest note is A
+			if (note == 'a') {
+				return 'G';
+			} else {
+				return note - 1;
+			}
+		}
+	}
+	return note; // no change
+}
+
+static uint32_t getNote(uint8_t ch)
+{
+    if (ch >= 'A' && ch <= 'G')
+        return notes[ch - 'A'];
+    if (ch >= 'a' && ch <= 'g')
+        return notes[ch - 'a' + 7];
+    return 0;
+}
+
+static uint32_t getDuration(uint8_t ch)
+{
+    if (ch < '0' || ch > '9')
+        return 400;
+    /* number of ms */
+    return (ch - '0') * 200;
+}
+
+static uint32_t getPause(uint8_t ch)
+{
+    switch (ch) {
+    case '+':
+        return 0;
+    case ',':
+        return 5;
+    case '.':
+        return 20;
+    case '_':
+        return 30;
+    default:
+        return 5;
+    }
+}
+
+static void playSong(uint8_t *song){
+    uint32_t note = 0;
+    uint32_t dur  = 0;
+    uint32_t pause = 0;
+
+    /*
+     * A song is a collection of tones where each tone is
+     * a note, duration and pause, e.g.
+     *
+     * "E2,F4,"
+     */
+
+    while(*song != '\0') {
+        note = getNote(*song++);
+        if (*song == '\0')
+            break;
+        dur  = getDuration(*song++);
+        if (*song == '\0')
+            break;
+        pause = getPause(*song++);
+
+        playNote(note, dur);
+        //delay32Ms(0, pause);
+        Timer0_Wait(pause);
+
+    }
+}
+
+static uint8_t * song = (uint8_t*)"C2.C2,D4,C4,F4,E8,";
+        //(uint8_t*)"C2.C2,D4,C4,F4,E8,C2.C2,D4,C4,G4,F8,C2.C2,c4,A4,F4,E4,D4,A2.A2,H4,F4,G4,F8,";
+        //"D4,B4,B4,A4,A4,G4,E4,D4.D2,E4,E4,A4,F4,D8.D4,d4,d4,c4,c4,B4,G4,E4.E2,F4,F4,A4,A4,G8,";
+
 /* ############################################################# */
 /* ################## INITIALIZING INTERRUPTS ################## */
 /* ############################################################# */
@@ -314,6 +451,9 @@ static int SW3_FLAG = 0;
 static int SAMPLING_FLAG = 0;
 static int NEW_LIGHTNING_FLAG = 0;
 static int UPDATE7SEG_FLAG = 0;
+static int JOYSTICK_UP_FLAG = 0;
+static int JOYSTICK_DOWN_FLAG = 0;
+static int JOYSTICK_PRESS_FLAG = 0;
 
 void init_Priority(void){
 
@@ -475,147 +615,43 @@ void EINT3_IRQHandler(void){
 			alarmNote = changeNote(alarmNote, LOWER_NOTE);
 		}
 	}
-}
 
-/* ############################################################# */
-/* ######### DEFINING FUNCTION AND NOTES FOR SPEAKER ########### */
-/* ############################################################# */
-
-#define NOTE_PIN_HIGH() GPIO_SetValue(0, 1<<26);
-#define NOTE_PIN_LOW()  GPIO_ClearValue(0, 1<<26);
-
-static uint32_t notes[] = {
-        2272, // A - 440 Hz
-        2024, // B - 494 Hz
-        3816, // C - 262 Hz
-        3401, // D - 294 Hz
-        3030, // E - 330 Hz
-        2865, // F - 349 Hz
-        2551, // G - 392 Hz
-        1136, // a - 880 Hz
-        1012, // b - 988 Hz
-        1912, // c - 523 Hz
-        1703, // d - 587 Hz
-        1517, // e - 659 Hz
-        1432, // f - 698 Hz
-        1275, // g - 784 Hz
-};
-
-static void playNote(uint32_t note, uint32_t durationMs) {
-
-    uint32_t t = 0;
-
-    if (note > 0) {
-
-        while (t < (durationMs*1000)) {
-            NOTE_PIN_HIGH();
-            Timer0_us_Wait(note / 2);
-            //delay32Us(0, note / 2);
-
-            NOTE_PIN_LOW();
-            Timer0_us_Wait(note / 2);
-            //delay32Us(0, note / 2);
-
-            t += note;
-        }
-    }
-    else {
-    	Timer0_Wait(durationMs);
-        //delay32Ms(0, durationMs);
-    }
-}
-
-static uint8_t changeNote(uint8_t note, uint8_t change){
-	if (change == HIGHER_NOTE) {
-		if (note != 'g') { // highest note is g
-			if (note == 'G') {
-				return 'a';
-			} else {
-				return note + 1;
-			}
-		}
-	} else if (change == LOWER_NOTE) {
-		if (note != 'A') { // lowest note is A
-			if (note == 'a') {
-				return 'G';
-			} else {
-				return note - 1;
-			}
-		} else {
-			return NULL; // mute beep
-		}
+	//up
+	if((LPC_GPIOINT->IO2IntStatF >> 3) & 0x1){
+		LPC_GPIOINT->IO2IntClr = 0x1 << 3;
+		JOYSTICK_UP_FLAG = 1;
 	}
-	return note; // no change
+
+	if((LPC_GPIOINT->IO0IntStatF >> 17) & 0x1){
+		LPC_GPIOINT->IO0IntClr = 0x1 << 17;
+		JOYSTICK_PRESS_FLAG = 1;
+	}
+
+	if((LPC_GPIOINT->IO0IntStatF >> 15) & 0x1){
+		LPC_GPIOINT->IO0IntClr = 0x1 << 15;
+		JOYSTICK_DOWN_FLAG = 1;
+	}
+
+	//notused
+	if((LPC_GPIOINT->IO2IntStatF >> 4) & 0x1){
+		LPC_GPIOINT->IO2IntClr = 0x1 << 4;
+	}
+	if((LPC_GPIOINT->IO0IntStatF >> 16) & 0x1){
+		LPC_GPIOINT->IO0IntClr = 0x1 << 16;
+	}
+
+    LPC_GPIOINT->IO0IntEnF |= 1 << 17; // center
+    LPC_GPIOINT->IO0IntEnF |= 1 << 15; // left
+    LPC_GPIOINT->IO0IntEnF |= 1 << 16; // right
+    LPC_GPIOINT->IO2IntEnF |= 1 << 3; // up
+    LPC_GPIOINT->IO2IntEnF |= 1 << 4; // down
 }
-
-static uint32_t getNote(uint8_t ch)
-{
-    if (ch >= 'A' && ch <= 'G')
-        return notes[ch - 'A'];
-    if (ch >= 'a' && ch <= 'g')
-        return notes[ch - 'a' + 7];
-    return 0;
-}
-
-static uint32_t getDuration(uint8_t ch)
-{
-    if (ch < '0' || ch > '9')
-        return 400;
-    /* number of ms */
-    return (ch - '0') * 200;
-}
-
-static uint32_t getPause(uint8_t ch)
-{
-    switch (ch) {
-    case '+':
-        return 0;
-    case ',':
-        return 5;
-    case '.':
-        return 20;
-    case '_':
-        return 30;
-    default:
-        return 5;
-    }
-}
-
-static void playSong(uint8_t *song){
-    uint32_t note = 0;
-    uint32_t dur  = 0;
-    uint32_t pause = 0;
-
-    /*
-     * A song is a collection of tones where each tone is
-     * a note, duration and pause, e.g.
-     *
-     * "E2,F4,"
-     */
-
-    while(*song != '\0') {
-        note = getNote(*song++);
-        if (*song == '\0')
-            break;
-        dur  = getDuration(*song++);
-        if (*song == '\0')
-            break;
-        pause = getPause(*song++);
-
-        playNote(note, dur);
-        //delay32Ms(0, pause);
-        Timer0_Wait(pause);
-
-    }
-}
-
-static uint8_t * song = (uint8_t*)"C2.C2,D4,C4,F4,E8,";
-        //(uint8_t*)"C2.C2,D4,C4,F4,E8,C2.C2,D4,C4,G4,F8,C2.C2,c4,A4,F4,E4,D4,A2.A2,H4,F4,G4,F8,";
-        //"D4,B4,B4,A4,A4,G4,E4,D4.D2,E4,E4,A4,F4,D8.D4,d4,d4,c4,c4,B4,G4,E4.E2,F4,F4,A4,A4,G8,";
 
 /* ############################################################# */
 /* ############ HELPER FUNCTIONS FOR PERIPHERALS ############### */
 /* ############################################################# */
+
+
 
 static int32_t readTempSensor(void){
 	int32_t temperature = temp_read();
@@ -742,22 +778,193 @@ void resetExplorer(void){ // reset all global variables and peripherals to initi
 }
 
 /* ############################################################# */
+/* ################## DEFINING OLED DISPLAY #################### */
+/* ############################################################# */
+
+void introDisplay(int hopePosition){
+
+	oled_clearScreen(OLED_COLOR_BLACK);
+	oled_putString(0,0,"====H.O.P.E.====",OLED_COLOR_BLACK,OLED_COLOR_WHITE);
+	oled_circle(45, 35, 15, OLED_COLOR_WHITE);
+
+	switch(hopePosition){
+	case 0:
+		oled_rect(40,10,50,20,OLED_COLOR_WHITE);
+		break;
+	case 1:
+		oled_rect(23,20,33,30,OLED_COLOR_WHITE);
+		break;
+	case 2:
+		oled_rect(23,38,33,48,OLED_COLOR_WHITE);
+		break;
+	case 3:
+		oled_rect(33,50,43,60,OLED_COLOR_WHITE);
+		break;
+	case 4:
+		oled_rect(47,50,57,60,OLED_COLOR_WHITE);
+		break;
+	case 5:
+		oled_rect(57,38,67,48,OLED_COLOR_WHITE);
+		break;
+	case 6:
+		oled_rect(57,20,67,30,OLED_COLOR_WHITE);
+		break;
+	default:
+		oled_rect(40,10,50,20,OLED_COLOR_WHITE);
+		break;
+	}
+}
+
+#define AVRG_READING_SELECTED 1
+#define SAVE_EEPROM_SELECTED 2
+#define LOAD_EEPROM_SELECTED 3
+#define CLEAR_EEPROM_SELECTED 4
+static int explorerMainDisplayMode = AVRG_READING_SELECTED; //default setting
+
+void explorerMainDisplayInit(){
+	JOYSTICK_UP_FLAG = 0;
+	JOYSTICK_DOWN_FLAG = 0;
+	JOYSTICK_PRESS_FLAG = 0;
+	oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+}
+
+//function to refresh the survival main display
+void explorerMainDisplayRefresh(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
+	char lightTempArray[20];
+	char xyzArray[20];
+	sprintf(lightTempArray, "L%d_T%d", (int)light_value, (int)temp_value);
+	sprintf(xyzArray, "AX%d_AY%d_AZ%d", (int)*(xyz_values), (int)*(xyz_values+1),(int)*(xyz_values+2));
+
+	oled_putString(0,0,(uint8_t*)lightTempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,10,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+}
+
+void explorerMainDisplayControl (){
+
+	if(JOYSTICK_DOWN_FLAG==1){
+		JOYSTICK_DOWN_FLAG=0;
+		if(explorerMainDisplayMode==AVRG_READING_SELECTED){
+			explorerMainDisplayMode=SAVE_EEPROM_SELECTED;
+		}else if(explorerMainDisplayMode==SAVE_EEPROM_SELECTED){
+			explorerMainDisplayMode=LOAD_EEPROM_SELECTED;
+		}else if(explorerMainDisplayMode==LOAD_EEPROM_SELECTED){
+			explorerMainDisplayMode=CLEAR_EEPROM_SELECTED;
+		}else if(explorerMainDisplayMode==CLEAR_EEPROM_SELECTED){
+			explorerMainDisplayMode=AVRG_READING_SELECTED;
+		}
+	}
+
+	if(JOYSTICK_UP_FLAG==1){
+		JOYSTICK_UP_FLAG=0;
+		if(explorerMainDisplayMode==AVRG_READING_SELECTED){
+			explorerMainDisplayMode=CLEAR_EEPROM_SELECTED;
+		}else if(explorerMainDisplayMode==SAVE_EEPROM_SELECTED){
+			explorerMainDisplayMode=AVRG_READING_SELECTED;
+		}else if(explorerMainDisplayMode==LOAD_EEPROM_SELECTED){
+			explorerMainDisplayMode=SAVE_EEPROM_SELECTED;
+		}else if(explorerMainDisplayMode==CLEAR_EEPROM_SELECTED){
+			explorerMainDisplayMode=LOAD_EEPROM_SELECTED;
+		}
+	}
+
+	switch(explorerMainDisplayMode){
+	case AVRG_READING_SELECTED:
+		oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	case SAVE_EEPROM_SELECTED:
+		oled_putString(0,30,"> Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	case LOAD_EEPROM_SELECTED:
+		oled_putString(0,40,"> Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	case CLEAR_EEPROM_SELECTED:
+		oled_putString(0,50,"> Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	default:
+		oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	}
+
+	if(JOYSTICK_PRESS_FLAG==1){
+		JOYSTICK_PRESS_FLAG==0;
+		if(explorerMainDisplayMode==AVRG_READING_SELECTED){
+
+
+		}else if(explorerMainDisplayMode==SAVE_EEPROM_SELECTED){
+
+
+		}else if(explorerMainDisplayMode==LOAD_EEPROM_SELECTED){
+
+
+		}else if(explorerMainDisplayMode==CLEAR_EEPROM_SELECTED){
+
+
+		}
+	}
+
+}
+
+void survivorDisplay(void){
+	char lightTempArray[20];
+	char xyzArray[20];
+	sprintf(lightTempArray, "LS_TS");
+	sprintf(xyzArray, "AXS_AYS_AZS");
+	oled_putString(0,0,"====H.O.P.E.====",OLED_COLOR_BLACK,OLED_COLOR_WHITE);
+	oled_putString(0,10,(uint8_t*)lightTempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+}
+
+/* ############################################################# */
 /* #################### INITIALIZING HOPE ###################### */
 /* ############################################################# */
 
 static void initializeHOPE(void){
+
+	int index = 0;
+	int oled_segment_display =0;
 	SEGMENT_DISPLAY = '0';
+
 	while (SEGMENT_DISPLAY != 'G') { // increment until segment displays 'F'
 		led7seg_setChar(SEGMENT_DISPLAY, FALSE); // display new incremented value
+
+		//showing oled display
+		if(oled_segment_display<=6){
+			introDisplay(oled_segment_display);
+		}else{
+			index=index+2; //to offset increase in oled_segment_display value
+			introDisplay(oled_segment_display-index);
+		}
+
 		Timer0_Wait(1000); // 1s interval
 		if (SEGMENT_DISPLAY == '6') {
 			SEGMENT_DISPLAY = 'A'; // change from number to alphabet
 		} else {
 			SEGMENT_DISPLAY += 1; // increment
+			oled_segment_display++;
 		}
+
 	}
 	SEGMENT_DISPLAY = NULL;
 	led7seg_setChar(SEGMENT_DISPLAY, FALSE); // clear 7 segment display
+	oled_clearScreen(OLED_COLOR_BLACK); //clear OLED screen
 }
 
 /* ############################################################# */
@@ -772,9 +979,14 @@ static void explorerTasks(void){
 		int32_t temp_value = readTempSensor();
 		int32_t *xyz_values;
 		xyz_values = readAccelerometer();
-		printValues(light_value, temp_value, xyz_values);
-		// TRANSMIT DATA TO HOME
+		explorerMainDisplayRefresh(light_value, temp_value, xyz_values);
+		char msg[50];
+		snprintf(msg,sizeof(msg),"L%d_T%d_AX%d_AY%d_AZ%d\r\n",(int)light_value,(int)temp_value,
+				(int)*(xyz_values),(int)*(xyz_values+1),(int)*(xyz_values+2));
+		UART_Send(LPC_UART3, (uint8_t *)msg, strlen(msg), BLOCKING);
 	}
+
+	explorerMainDisplayControl();
 
 }
 
@@ -782,9 +994,9 @@ static void survivalTasks(void){
 
 	if (ledOn == 0) { // no lightning in previous 4s, safe to switch to EXPLORER_MODE
 		OPERATION_MODE = EXPLORER_MODE;
+		explorerMainDisplayInit(); //init explorer display
     	UART_Send(LPC_UART3, (uint8_t *)EXIT_SURVIVAL_MESSAGE , strlen(EXIT_SURVIVAL_MESSAGE), BLOCKING);
 	}
-
 }
 
 static void genericTasks(void){
@@ -832,16 +1044,8 @@ static void genericTasks(void){
 	// CONDITION FOR SWITCHING TO SURVIVAL MODE
 	if ((recentFlashesStackPointer >= 2) && (OPERATION_MODE == EXPLORER_MODE)) {
 		OPERATION_MODE = SURVIVAL_MODE;
-    	char lightArray[20];
-    	char tempArray[20];
-    	char xyzArray[20];
-    	sprintf(lightArray, "LS");
-    	sprintf(tempArray, "TS");
-    	sprintf(xyzArray, "AXS_AYS_AZS");
-        oled_clearScreen(OLED_COLOR_BLACK);
-    	oled_putString(0,0,(uint8_t*)lightArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-    	oled_putString(0,10,(uint8_t*)tempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-    	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_clearScreen(OLED_COLOR_BLACK);
+		survivorDisplay();
     	UART_Send(LPC_UART3, (uint8_t *)ENTER_SURVIVAL_MESSAGE , strlen(ENTER_SURVIVAL_MESSAGE), BLOCKING);
 	}
 
@@ -901,6 +1105,7 @@ int main(void){
 
 	initializeHOPE();
     init_Interrupts();
+    explorerMainDisplayInit();
 
     uint8_t resetButtonSW4 = 1;
 
