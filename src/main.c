@@ -115,7 +115,7 @@ static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
 static int aboveThreshold = 0;
 
-uint8_t alarmNote = 'a';
+uint8_t alarmNote = 'C';
 
 /* ############################################################# */
 /* ################## DEFINING AND SYSTICK ##################### */
@@ -356,16 +356,28 @@ static void playNote(uint32_t note, uint32_t durationMs) {
 
 static uint8_t changeNote(uint8_t note, uint8_t change){
 	if (change == HIGHER_NOTE) {
-		if (note != 'g') { // highest note is g
+		if (note == NULL) {
+			return 'C';
+		} else if (note != 'b') { // highest note is b
 			if (note == 'G') {
+				return 'A';
+			} else if (note == 'B'){
+				return 'c';
+			} else if (note == 'g') {
 				return 'a';
 			} else {
 				return note + 1;
 			}
 		}
 	} else if (change == LOWER_NOTE) {
-		if (note != 'A') { // lowest note is A
+		if (note == 'C') {
+			return NULL;
+		} else if (note != 'C') { // lowest note is C
 			if (note == 'a') {
+				return 'g';
+			} else if (note == 'c') {
+				return 'B';
+			} else if (note == 'A') {
 				return 'G';
 			} else {
 				return note - 1;
@@ -582,9 +594,6 @@ void TIMER1_IRQHandler(void){ // PCA9532 Timer
 
 void TIMER2_IRQHandler(void){ // RGB timer
 	rgbBlinky();
-	if (alarmNote != NULL) {
-		beep();
-	}
 	TIM_ClearIntPending(LPC_TIM2,0);
 }
 
@@ -733,7 +742,7 @@ void init_Speaker(void){
 }
 
 void beep(void){
-	playNote(getNote(alarmNote),200);
+	playNote(getNote(alarmNote),50);
 }
 
 void resetExplorer(void){ // reset all global variables and peripherals to initial values
@@ -1073,7 +1082,6 @@ int main(void){
     init_ssp();
     init_GPIO();
     init_uart();
-    init_Speaker();
     init_Priority();
 
     pca9532_init();
