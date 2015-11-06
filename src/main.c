@@ -18,6 +18,8 @@
 //put into j36 - enable light sensor
 //j13 from BLEN to PIO2_9 - use SW3 interrupt
 //remove j23 jumper at PIO1_10 to green RGB - disable green RGB
+//remove j20 top two jumpers for UART
+//put jumper in j58
 
 //include brief summary of program functioning
 
@@ -450,6 +452,9 @@ static int SW3_FLAG = 0;
 static int SAMPLING_FLAG = 0;
 static int NEW_LIGHTNING_FLAG = 0;
 static int UPDATE7SEG_FLAG = 0;
+static int JOYSTICK_UP_FLAG = 0;
+static int JOYSTICK_DOWN_FLAG = 0;
+static int JOYSTICK_PRESS_FLAG = 0;
 
 void init_Priority(void){
 
@@ -608,6 +613,36 @@ void EINT3_IRQHandler(void){
 			alarmNote = changeNote(alarmNote, LOWER_NOTE);
 		}
 	}
+
+	//up
+	if((LPC_GPIOINT->IO2IntStatF >> 3) & 0x1){
+		LPC_GPIOINT->IO2IntClr = 0x1 << 3;
+		JOYSTICK_UP_FLAG = 1;
+	}
+
+	if((LPC_GPIOINT->IO0IntStatF >> 17) & 0x1){
+		LPC_GPIOINT->IO0IntClr = 0x1 << 17;
+		JOYSTICK_PRESS_FLAG = 1;
+	}
+
+	if((LPC_GPIOINT->IO0IntStatF >> 15) & 0x1){
+		LPC_GPIOINT->IO0IntClr = 0x1 << 15;
+		JOYSTICK_DOWN_FLAG = 1;
+	}
+
+	//notused
+	if((LPC_GPIOINT->IO2IntStatF >> 4) & 0x1){
+		LPC_GPIOINT->IO2IntClr = 0x1 << 4;
+	}
+	if((LPC_GPIOINT->IO0IntStatF >> 16) & 0x1){
+		LPC_GPIOINT->IO0IntClr = 0x1 << 16;
+	}
+
+    LPC_GPIOINT->IO0IntEnF |= 1 << 17; // center
+    LPC_GPIOINT->IO0IntEnF |= 1 << 15; // left
+    LPC_GPIOINT->IO0IntEnF |= 1 << 16; // right
+    LPC_GPIOINT->IO2IntEnF |= 1 << 3; // up
+    LPC_GPIOINT->IO2IntEnF |= 1 << 4; // down
 }
 
 /* ############################################################# */
@@ -774,44 +809,110 @@ void introDisplay(int hopePosition){
 	}
 }
 
-static int explorerMainDisplayMode = 1; //default setting
+#define AVRG_READING_SELECTED 1
+#define SAVE_EEPROM_SELECTED 2
+#define LOAD_EEPROM_SELECTED 3
+#define CLEAR_EEPROM_SELECTED 4
+static int explorerMainDisplayMode = AVRG_READING_SELECTED; //default setting
+
+void explorerMainDisplayInit(){
+	JOYSTICK_UP_FLAG = 0;
+	JOYSTICK_DOWN_FLAG = 0;
+	JOYSTICK_PRESS_FLAG = 0;
+	oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+}
 
 //function to refresh the survival main display
-void explorerMainDisplay(int mode, int32_t light_value, int32_t temp_value, int32_t *xyz_values){
+void explorerMainDisplayRefresh(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 	char lightTempArray[20];
 	char xyzArray[20];
 	sprintf(lightTempArray, "L%d_T%d", (int)light_value, (int)temp_value);
 	sprintf(xyzArray, "AX%d_AY%d_AZ%d", (int)*(xyz_values), (int)*(xyz_values+1),(int)*(xyz_values+2));
 
-	oled_putString(0,0,"====H.O.P.E.====",OLED_COLOR_BLACK,OLED_COLOR_WHITE);
-	oled_putString(0,10,(uint8_t*)lightTempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,30,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,40,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,50,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,60,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-
-	switch(mode){
-	case 1:
-		oled_putString(0,30,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		break;
-	case 2:
-		oled_putString(0,40,"> Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		break;
-	case 3:
-		oled_putString(0,50,"> Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		break;
-	case 4:
-		oled_putString(0,60,"> Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		break;
-	default:
-		oled_putString(0,30,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		break;
-	}
+	oled_putString(0,0,(uint8_t*)lightTempArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,10,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
-//returns the mode that the explorer main should be in
-int explorerMainControl(int joystick_input){
+void explorerMainDisplayControl (){
+
+	if(JOYSTICK_DOWN_FLAG==1){
+		JOYSTICK_DOWN_FLAG=0;
+		if(explorerMainDisplayMode==AVRG_READING_SELECTED){
+			explorerMainDisplayMode=SAVE_EEPROM_SELECTED;
+		}else if(explorerMainDisplayMode==SAVE_EEPROM_SELECTED){
+			explorerMainDisplayMode=LOAD_EEPROM_SELECTED;
+		}else if(explorerMainDisplayMode==LOAD_EEPROM_SELECTED){
+			explorerMainDisplayMode=CLEAR_EEPROM_SELECTED;
+		}else if(explorerMainDisplayMode==CLEAR_EEPROM_SELECTED){
+			explorerMainDisplayMode=AVRG_READING_SELECTED;
+		}
+	}
+
+	if(JOYSTICK_UP_FLAG==1){
+		JOYSTICK_UP_FLAG=0;
+		if(explorerMainDisplayMode==AVRG_READING_SELECTED){
+			explorerMainDisplayMode=CLEAR_EEPROM_SELECTED;
+		}else if(explorerMainDisplayMode==SAVE_EEPROM_SELECTED){
+			explorerMainDisplayMode=AVRG_READING_SELECTED;
+		}else if(explorerMainDisplayMode==LOAD_EEPROM_SELECTED){
+			explorerMainDisplayMode=SAVE_EEPROM_SELECTED;
+		}else if(explorerMainDisplayMode==CLEAR_EEPROM_SELECTED){
+			explorerMainDisplayMode=LOAD_EEPROM_SELECTED;
+		}
+	}
+
+	switch(explorerMainDisplayMode){
+	case AVRG_READING_SELECTED:
+		oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	case SAVE_EEPROM_SELECTED:
+		oled_putString(0,30,"> Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	case LOAD_EEPROM_SELECTED:
+		oled_putString(0,40,"> Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	case CLEAR_EEPROM_SELECTED:
+		oled_putString(0,50,"> Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	default:
+		oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		break;
+	}
+
+	if(JOYSTICK_PRESS_FLAG==1){
+		JOYSTICK_PRESS_FLAG==0;
+		if(explorerMainDisplayMode==AVRG_READING_SELECTED){
+
+
+		}else if(explorerMainDisplayMode==SAVE_EEPROM_SELECTED){
+
+
+		}else if(explorerMainDisplayMode==LOAD_EEPROM_SELECTED){
+
+
+		}else if(explorerMainDisplayMode==CLEAR_EEPROM_SELECTED){
+
+
+		}
+	}
 
 }
 
@@ -872,9 +973,14 @@ static void explorerTasks(void){
 		int32_t temp_value = readTempSensor();
 		int32_t *xyz_values;
 		xyz_values = readAccelerometer();
-		explorerMainDisplay(explorerMainDisplayMode, light_value, temp_value, xyz_values);
-		// TRANSMIT DATA TO HOME
+		explorerMainDisplayRefresh(light_value, temp_value, xyz_values);
+		char msg[50];
+		snprintf(msg,sizeof(msg),"L%d_T%d_AX%d_AY%d_AZ%d\r\n",(int)light_value,(int)temp_value,
+				(int)*(xyz_values),(int)*(xyz_values+1),(int)*(xyz_values+2));
+		UART_Send(LPC_UART3, (uint8_t *)msg, strlen(msg), BLOCKING);
 	}
+
+	explorerMainDisplayControl();
 
 }
 
@@ -882,9 +988,9 @@ static void survivalTasks(void){
 
 	if (ledOn == 0) { // no lightning in previous 4s, safe to switch to EXPLORER_MODE
 		OPERATION_MODE = EXPLORER_MODE;
+		explorerMainDisplayInit(); //init explorer display
     	UART_Send(LPC_UART3, (uint8_t *)EXIT_SURVIVAL_MESSAGE , strlen(EXIT_SURVIVAL_MESSAGE), BLOCKING);
 	}
-
 }
 
 static void genericTasks(void){
@@ -992,6 +1098,7 @@ int main(void){
 
 	initializeHOPE();
     init_Interrupts();
+    explorerMainDisplayInit();
 
     uint8_t resetButtonSW4 = 1;
 
