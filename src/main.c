@@ -170,7 +170,6 @@ static void enableTimer(int timerNumber, uint32_t time){
 	TIM_Cmd(TIMx, ENABLE);
 }
 
-
 /* ############################################################# */
 /* ############## INITIALIZING SSP, I2C, GPIO ################## */
 /* ############################################################# */
@@ -443,6 +442,9 @@ void TIMER1_IRQHandler(void){ // PCA9532 Timer
 
 void TIMER2_IRQHandler(void){ // RGB timer
 	rgbBlinky();
+	if (alarmNote != NULL) {
+		beep();
+	}
 	TIM_ClearIntPending(LPC_TIM2,0);
 }
 
@@ -539,6 +541,8 @@ static uint8_t changeNote(uint8_t note, uint8_t change){
 			} else {
 				return note - 1;
 			}
+		} else {
+			return NULL; // mute beep
 		}
 	}
 	return note; // no change
@@ -690,6 +694,10 @@ void init_Speaker(void){
     GPIO_ClearValue(0, 1<<27); //LM4811-clk
     GPIO_ClearValue(0, 1<<28); //LM4811-up/dn
     GPIO_ClearValue(2, 1<<13); //LM4811-shutdn
+}
+
+void beep(void){
+	playNote(getNote(alarmNote),200);
 }
 
 void resetExplorer(void){ // reset all global variables and peripherals to initial values
@@ -861,6 +869,7 @@ int main(void){
     init_ssp();
     init_GPIO();
     init_uart();
+    init_Speaker();
     init_Priority();
 
     pca9532_init();
