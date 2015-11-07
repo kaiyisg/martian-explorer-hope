@@ -104,7 +104,7 @@ static int RGB_ON = 0;
 static uint32_t recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
 
 // keeps track of how many flashes in past LIGHTNING_TIME_WINDOW
-static int recentFlashesStackPointer = -1;
+static int recentFlashesStackPointer = -1; // -1 since there are no values in array initially
 
 static int recentFlashesSize = sizeof(recentFlashes)/sizeof(recentFlashes[0]);
 
@@ -1025,13 +1025,13 @@ static void genericTasks(void){
 
 	if (NEW_LIGHTNING_FLAG == 1) {
 		NEW_LIGHTNING_FLAG = 0;
-		// Push new value of flashEnd into recentFlashes
+		// Push new value of flashBeginning into recentFlashes
 		int i=7;
 		while(i>=0){
 			recentFlashes[i+1]=recentFlashes[i]; //shift values to the right
 			i--;
 		}
-		recentFlashes[0] = flashEnd; // push new value into first element of array
+		recentFlashes[0] = flashBeginning; // push new value into first element of array
 		if (recentFlashesStackPointer != recentFlashesSize-1) {
 			recentFlashesStackPointer++; // increment only if pointer does not point outside the array
 		}
@@ -1045,17 +1045,17 @@ static void genericTasks(void){
 		}
 	}
 
-	if (UPDATE7SEG_FLAG == 1) {
-		UPDATE7SEG_FLAG = 0;
-		led7seg_setChar(SEGMENT_DISPLAY, FALSE);
-	}
-
 	// CONDITION FOR SWITCHING TO SURVIVAL MODE
 	if ((recentFlashesStackPointer >= 2) && (OPERATION_MODE == EXPLORER_MODE)) {
 		OPERATION_MODE = SURVIVAL_MODE;
 		oled_clearScreen(OLED_COLOR_BLACK);
 		survivorDisplay();
     	UART_Send(LPC_UART3, (uint8_t *)ENTER_SURVIVAL_MESSAGE , strlen(ENTER_SURVIVAL_MESSAGE), BLOCKING);
+	}
+
+	if (UPDATE7SEG_FLAG == 1) {
+		UPDATE7SEG_FLAG = 0;
+		led7seg_setChar(SEGMENT_DISPLAY, FALSE);
 	}
 
 	if (SW3_FLAG == 1) {
