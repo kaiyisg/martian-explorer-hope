@@ -321,6 +321,7 @@ static int JOYSTICK_UP_FLAG = 0;
 static int JOYSTICK_DOWN_FLAG = 0;
 static int JOYSTICK_PRESS_FLAG = 0;
 static int JOYSTICK_LEFT_FLAG = 0;
+static int JOYSTICK_RIGHT_FLAG = 0;
 
 void init_Priority(void){
 
@@ -503,6 +504,7 @@ void EINT3_IRQHandler(void){
 	//joystick right
 	if((LPC_GPIOINT->IO0IntStatF >> 16) & 0x1){
 		LPC_GPIOINT->IO0IntClr = 0x1 << 16;
+		JOYSTICK_RIGHT_FLAG = 1;
 	}
 
     LPC_GPIOINT->IO0IntEnF |= 1 << 17; // center
@@ -619,6 +621,7 @@ void resetHOPE(void){ // reset all global variables and peripherals to initial v
 	JOYSTICK_DOWN_FLAG = 0;
 	JOYSTICK_PRESS_FLAG = 0;
 	JOYSTICK_LEFT_FLAG = 0;
+	JOYSTICK_RIGHT_FLAG = 0;
 	SEGMENT_DISPLAY = '0';
 
 	/* RESET PERIPHERALS */
@@ -688,6 +691,8 @@ void explorerMainDisplayInit(){
 	JOYSTICK_UP_FLAG = 0;
 	JOYSTICK_DOWN_FLAG = 0;
 	JOYSTICK_PRESS_FLAG = 0;
+	JOYSTICK_LEFT_FLAG = 0;
+	JOYSTICK_RIGHT_FLAG = 0;
 	oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,30,"  Save Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,40,"  Load Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
@@ -873,9 +878,10 @@ void explorerMainDisplayControl (){
 		}
 	}
 
-	// joystick press confirms selection
-	if(JOYSTICK_PRESS_FLAG==1){
+	// joystick press or right confirms selection
+	if(JOYSTICK_PRESS_FLAG==1 || JOYSTICK_RIGHT_FLAG==1){
 		JOYSTICK_PRESS_FLAG=0;
+		JOYSTICK_RIGHT_FLAG=0;
 
 		switch(explorerScreen){
 
