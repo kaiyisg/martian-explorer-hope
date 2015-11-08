@@ -779,6 +779,7 @@ void introDisplay(int hopePosition){
 
 	oled_clearScreen(OLED_COLOR_BLACK);
 	oled_putString(0,0,"====H.O.P.E.====",OLED_COLOR_BLACK,OLED_COLOR_WHITE);
+	oled_putString(0,35,"      MARS    ",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_circle(45, 35, 15, OLED_COLOR_WHITE);
 
 	switch(hopePosition){
@@ -815,14 +816,22 @@ void introDisplay(int hopePosition){
 #define CLEAR_EEPROM_SELECTED 4
 static int explorerMainDisplayMode = AVRG_READING_SELECTED; //default setting
 
+#define MAIN_SCREEN 0
+#define AVRG_READING_SCREEN 1
+#define SAVE_EEPROM_SCREEN 2
+#define LOAD_EEPROM_SCREEN 3
+#define CLEAR_EEPROM_SCREEN 4
+static int explorerScreen = 0;
+
 void explorerMainDisplayInit(){
 	JOYSTICK_UP_FLAG = 0;
 	JOYSTICK_DOWN_FLAG = 0;
 	JOYSTICK_PRESS_FLAG = 0;
-	oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	explorerScreen = MAIN_SCREEN;
 }
 
 //function to refresh the survival main display
@@ -836,7 +845,81 @@ void explorerMainDisplayRefresh(int32_t light_value, int32_t temp_value, int32_t
 	oled_putString(0,10,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
+void explorerDisplayClearScreen(){
+	oled_putString(0,20,"                  ",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,30,"                  ",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,"                  ",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,50,"                  ",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+}
+
+//values to track diagnostics and readings
+static int32_t avrg_light_value;
+static int32_t highest_light_value;
+static int32_t lowest_light_value;
+static int32_t avrg_temp_value;
+static int32_t highest_temp_value;
+static int32_t lowest_temp_value;
+static int32_t avrg_xyz_values[3];
+static int32_t highest_xyz_values[3];
+static int32_t lowest_xyz_values[3];
+static int diag_value_count = 0;
+static int explorer_avrg_display_page = 1;
+
+void explorerAvrgDisplay(int page){
+	char avrgArray[20];
+	char maxArray[20];
+	char minArray[20];
+	if(page==1){
+		sprintf(avrgArray, "AVG-L%d", (int)avrg_light_value);
+		sprintf(maxArray, "MAX-L%d", (int)highest_light_value);
+		sprintf(minArray, "MIN-L%d", (int)lowest_light_value);
+		explorerDisplayClearScreen();
+		oled_putString(0,30,(uint8_t*)avrgArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,40,(uint8_t*)maxArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,50,(uint8_t*)minArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,20,"Light Readings",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	}else if(page==2){
+		sprintf(avrgArray, "AVG-T%d", (int)avrg_temp_value);
+		sprintf(maxArray, "MAX-T%d", (int)highest_temp_value);
+		sprintf(minArray, "MIN-T%d", (int)lowest_temp_value);
+		explorerDisplayClearScreen();
+		oled_putString(0,30,(uint8_t*)avrgArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,40,(uint8_t*)maxArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,50,(uint8_t*)minArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,20,"Temp Readings",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	}else{
+		sprintf(avrgArray, "AVG/X%dY%d/Z%d", (int)*(avrg_xyz_values),
+				(int)*(avrg_xyz_values+1),(int)*(avrg_xyz_values+2));
+		sprintf(maxArray, "MAX/X%dY%dZ%d", (int)*(highest_xyz_values),
+				(int)*(highest_xyz_values+1),(int)*(highest_xyz_values+2));
+		sprintf(minArray, "MIN/X%dY%dZ%d", (int)*(lowest_xyz_values),
+				(int)*(lowest_xyz_values+1),(int)*(lowest_xyz_values+2));
+		explorerDisplayClearScreen();
+		oled_putString(0,30,(uint8_t*)avrgArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,40,(uint8_t*)maxArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,50,(uint8_t*)minArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		oled_putString(0,20,"XYZ Readings",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	}
+}
+
+void explorerSaveEEPROMDisplay(void){
+}
+
+void explorerLoadEEPROMDisplay(void){
+}
+
+void explorerClearEEPROMDisplay(void){
+	oled_putString(0,20,"The values stored in",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,"EEPROM have been cleared!",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+}
+
 void explorerMainDisplayControl (){
+
+	//joystick up and down only used in main screen
+	if(explorerScreen != MAIN_SCREEN){
+		JOYSTICK_DOWN_FLAG=0;
+		JOYSTICK_UP_FLAG=0;
+	}
 
 	if(JOYSTICK_DOWN_FLAG==1){
 		JOYSTICK_DOWN_FLAG=0;
@@ -864,56 +947,103 @@ void explorerMainDisplayControl (){
 		}
 	}
 
-	switch(explorerMainDisplayMode){
-	case AVRG_READING_SELECTED:
-		oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		break;
-	case SAVE_EEPROM_SELECTED:
-		oled_putString(0,30,"> Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		break;
-	case LOAD_EEPROM_SELECTED:
-		oled_putString(0,40,"> Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		break;
-	case CLEAR_EEPROM_SELECTED:
-		oled_putString(0,50,"> Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		break;
-	default:
-		oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		break;
-	}
-
-	if(JOYSTICK_PRESS_FLAG==1){
-		JOYSTICK_PRESS_FLAG==0;
-		if(explorerMainDisplayMode==AVRG_READING_SELECTED){
-
-
-		}else if(explorerMainDisplayMode==SAVE_EEPROM_SELECTED){
-
-
-		}else if(explorerMainDisplayMode==LOAD_EEPROM_SELECTED){
-
-
-		}else if(explorerMainDisplayMode==CLEAR_EEPROM_SELECTED){
-
-
+	if(explorerScreen == MAIN_SCREEN){
+		switch(explorerMainDisplayMode){
+		case AVRG_READING_SELECTED:
+			oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			break;
+		case SAVE_EEPROM_SELECTED:
+			oled_putString(0,30,"> Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			break;
+		case LOAD_EEPROM_SELECTED:
+			oled_putString(0,40,"> Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			break;
+		case CLEAR_EEPROM_SELECTED:
+			oled_putString(0,50,"> Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			break;
+		default:
+			oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			break;
 		}
 	}
 
+	if(JOYSTICK_PRESS_FLAG==1){
+		JOYSTICK_PRESS_FLAG=0;
+
+		switch(explorerScreen){
+
+		case MAIN_SCREEN:
+
+			//select average reading on main screen
+			if(explorerMainDisplayMode==AVRG_READING_SELECTED){
+				explorerScreen=AVRG_READING_SCREEN;
+				explorerAvrgDisplay(explorer_avrg_display_page);
+				explorer_avrg_display_page++;
+
+			//select save eeprom on main screen
+			}else if(explorerMainDisplayMode==SAVE_EEPROM_SELECTED){
+				explorerScreen=SAVE_EEPROM_SCREEN;
+				explorerSaveEEPROMDisplay();
+
+			//select load eeprom on main screen
+			}else if(explorerMainDisplayMode==LOAD_EEPROM_SELECTED){
+				explorerScreen=LOAD_EEPROM_SCREEN;
+				explorerLoadEEPROMDisplay();
+
+			//select clear eeprom on main screen
+			}else if(explorerMainDisplayMode==CLEAR_EEPROM_SELECTED){
+				explorerScreen=CLEAR_EEPROM_SCREEN;
+				explorerClearEEPROMDisplay();
+			}
+			break;
+
+		//loop through arvg reading screen till end, return to main screen
+		case AVRG_READING_SCREEN:
+			if(explorer_avrg_display_page>3){
+				explorer_avrg_display_page=1;
+				explorerMainDisplayMode=AVRG_READING_SELECTED;
+				explorerScreen = MAIN_SCREEN;
+				explorerMainDisplayInit();
+			}else{
+				explorerAvrgDisplay(explorer_avrg_display_page);
+				explorer_avrg_display_page++;
+			}
+			break;
+
+		//go back to main screen on click
+		case SAVE_EEPROM_SCREEN:
+			explorerMainDisplayMode=MAIN_SCREEN;
+			explorerMainDisplayInit();
+			break;
+
+		//go back to main screen on click
+		case LOAD_EEPROM_SCREEN:
+			explorerMainDisplayMode=MAIN_SCREEN;
+			explorerMainDisplayInit();
+			break;
+
+		//go back to main screen on click
+		case CLEAR_EEPROM_SCREEN:
+			explorerMainDisplayMode=MAIN_SCREEN;
+			explorerMainDisplayInit();
+			break;
+		}
+	}
 }
 
 void survivorDisplay(void){
@@ -965,6 +1095,51 @@ static void initializeHOPE(void){
 /* ##################### TASK HANDLERS ######################### */
 /* ############################################################# */
 
+
+void explorerDiagnosticLogic(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
+	//calculate all time average values for this run
+	if(diag_value_count==0){
+		avrg_light_value = light_value;
+		highest_light_value = light_value;
+		lowest_light_value = light_value;
+		avrg_temp_value = temp_value;
+		highest_temp_value = temp_value;
+		lowest_temp_value = temp_value;
+		*avrg_xyz_values = *xyz_values;
+		*highest_xyz_values = *xyz_values;
+		*lowest_xyz_values = *xyz_values;
+		*(avrg_xyz_values+1) = *(xyz_values+1);
+		*(highest_xyz_values+1) = *(xyz_values+1);
+		*(lowest_xyz_values+1) = *(xyz_values+1);
+		*(avrg_xyz_values+2) = *(xyz_values+2);
+		*(highest_xyz_values+1) = *(xyz_values+1);
+		*(lowest_xyz_values+1) = *(xyz_values+1);
+		diag_value_count++;
+	}else{
+		avrg_light_value = ((avrg_light_value)*diag_value_count+
+				light_value)/(diag_value_count+1);
+		if(highest_light_value<light_value)highest_light_value = light_value;
+		if(lowest_light_value>light_value)lowest_light_value = light_value;
+		avrg_temp_value = ((avrg_temp_value)*diag_value_count+
+				temp_value)/(diag_value_count+1);
+		if(highest_temp_value<temp_value)highest_temp_value = temp_value;
+		if(lowest_temp_value>temp_value)lowest_temp_value = temp_value;
+		*avrg_xyz_values = ((*avrg_xyz_values)*diag_value_count+
+				(*xyz_values))/(diag_value_count+1);
+		if((*highest_xyz_values)<(*xyz_values))(*highest_xyz_values) = (*xyz_values);
+		if((*lowest_xyz_values)>(*xyz_values))(*lowest_xyz_values) = (*xyz_values);
+		*(avrg_xyz_values+1) = ((*(avrg_xyz_values+1))*diag_value_count+
+				(*(xyz_values+1)))/(diag_value_count+1);
+		if((*(highest_xyz_values+1))<(*(xyz_values+1)))(*(highest_xyz_values+1)) = (*(xyz_values+1));
+		if((*(lowest_xyz_values+1))>(*(xyz_values+1)))(*(lowest_xyz_values+1)) = (*(xyz_values+1));
+		*(avrg_xyz_values+2) = ((*(avrg_xyz_values+2))*diag_value_count+
+				(*(xyz_values+2)))/(diag_value_count+1);
+		if((*(highest_xyz_values+2))<(*(xyz_values+2)))(*(highest_xyz_values+2)) = (*(xyz_values+2));
+		if((*(lowest_xyz_values+2))>(*(xyz_values+2)))(*(lowest_xyz_values+2)) = (*(xyz_values+2));
+		diag_value_count++;
+	}
+}
+
 static void explorerTasks(void){
 
 	if (SAMPLING_FLAG == 1) {
@@ -978,8 +1153,9 @@ static void explorerTasks(void){
 		snprintf(msg,sizeof(msg),"L%d_T%d_AX%d_AY%d_AZ%d\r\n",(int)light_value,(int)temp_value,
 				(int)*(xyz_values),(int)*(xyz_values+1),(int)*(xyz_values+2));
 		UART_Send(LPC_UART3, (uint8_t *)msg, strlen(msg), BLOCKING);
-	}
 
+		explorerDiagnosticLogic(light_value, temp_value, xyz_values);
+	}
 	explorerMainDisplayControl();
 
 }
@@ -1096,7 +1272,7 @@ int main(void){
     // Initialize OLED
     oled_clearScreen(OLED_COLOR_BLACK);
 
-	initializeHOPE();
+	//initializeHOPE();
     init_Interrupts();
     explorerMainDisplayInit();
 
