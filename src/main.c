@@ -102,7 +102,7 @@ static uint32_t recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
 
 // keeps track of how many flashes in past LIGHTNING_TIME_WINDOW
 static int recentFlashesStackPointer = -1; // -1 since there are no values in array initially
-
+// size of recentFlashes array (currently set at 9)
 static int recentFlashesSize = sizeof(recentFlashes)/sizeof(recentFlashes[0]);
 
 // Timestamp checking beginning and end interrupt of each
@@ -112,10 +112,33 @@ static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
 static int aboveThreshold = 0;
 
-//variable to control Noise rejection for lightning detection
+//variable to control noise rejection for lightning detection
 //controls the number of flashes required to enter survivor mode
-static int flashesToEnterSurvivor = 3;
-static int flashesToEnterSurvivorDisplay;
+static int flashesToEnterSurvival = 3;
+static int flashesToEnterSurvivalDisplay;
+
+//variables for OLED display
+#define AVRG_READING_SELECTED 1
+#define CONTROL_FLASHES_SELECTED 2
+static int explorerMainDisplaySelection = AVRG_READING_SELECTED; //default setting
+
+#define MAIN_SCREEN 0
+#define AVRG_READING_SCREEN 1
+#define CONTROL_FLASHES_SCREEN 2
+static int explorerScreen = 0;
+
+//values to track diagnostics and readings
+static int32_t avrg_light_value;
+static int32_t highest_light_value;
+static int32_t lowest_light_value;
+static int32_t avrg_temp_value;
+static int32_t highest_temp_value;
+static int32_t lowest_temp_value;
+static int32_t avrg_xyz_values[3];
+static int32_t highest_xyz_values[3];
+static int32_t lowest_xyz_values[3];
+static int diagnostic_runs_count = 0;
+static int explorer_diagnostic_display_page = 1;
 
 /* ############################################################# */
 /* ################## DEFINING AND SYSTICK ##################### */
@@ -319,6 +342,8 @@ static int UPDATE7SEG_FLAG = 0;
 static int JOYSTICK_UP_FLAG = 0;
 static int JOYSTICK_DOWN_FLAG = 0;
 static int JOYSTICK_PRESS_FLAG = 0;
+static int JOYSTICK_LEFT_FLAG = 0;
+static int JOYSTICK_RIGHT_FLAG = 0;
 
 void init_Priority(void){
 
@@ -341,7 +366,7 @@ void init_Priority(void){
 	PP = 2, SP = 2;
 	priority = NVIC_EncodePriority(PG,PP,SP);
 	NVIC_SetPriority(TIMER3_IRQn, priority); // sampling (2s)
-
+	// clear pending status before enabling
 	NVIC_ClearPendingIRQ(EINT3_IRQn);
 	NVIC_ClearPendingIRQ(TIMER1_IRQn);
 	NVIC_ClearPendingIRQ(TIMER2_IRQn);
@@ -374,7 +399,7 @@ void init_Interrupts(void){
         light_setHiThreshold(LIGHTNING_THRESHOLD);
         light_setLoThreshold(0); // disable low threshold
     }
-
+    // clear interrupts before enabling
     LPC_GPIOINT->IO2IntClr = 1 << 5;
     LPC_GPIOINT->IO2IntClr = 1 << 10;
     LPC_GPIOINT->IO0IntClr = 1 << 24;
@@ -391,10 +416,10 @@ void init_Interrupts(void){
     LPC_GPIOINT->IO0IntEnF |= 1 << 25; // rotary switch left
     // joystick
     LPC_GPIOINT->IO0IntEnF |= 1 << 17; // center
-    LPC_GPIOINT->IO0IntEnF |= 1 << 15; // left
+    LPC_GPIOINT->IO0IntEnF |= 1 << 15; // down
     LPC_GPIOINT->IO0IntEnF |= 1 << 16; // right
     LPC_GPIOINT->IO2IntEnF |= 1 << 3; // up
-    LPC_GPIOINT->IO2IntEnF |= 1 << 4; // down
+    LPC_GPIOINT->IO2IntEnF |= 1 << 4; // left
 
 	enableTimer(RGB, 1000); // RGB will blink throughout operation at 1000ms interval
 	enableTimer(SAMPLING, 2000);
@@ -478,35 +503,37 @@ void EINT3_IRQHandler(void){
 		}
 	}
 
-	//up
+	//joystick up
 	if((LPC_GPIOINT->IO2IntStatF >> 3) & 0x1){
 		LPC_GPIOINT->IO2IntClr = 0x1 << 3;
 		JOYSTICK_UP_FLAG = 1;
 	}
-
+	//joystick center
 	if((LPC_GPIOINT->IO0IntStatF >> 17) & 0x1){
 		LPC_GPIOINT->IO0IntClr = 0x1 << 17;
 		JOYSTICK_PRESS_FLAG = 1;
 	}
-
+	//joystick down
 	if((LPC_GPIOINT->IO0IntStatF >> 15) & 0x1){
 		LPC_GPIOINT->IO0IntClr = 0x1 << 15;
 		JOYSTICK_DOWN_FLAG = 1;
 	}
-
-	//notused
+	//joystick left
 	if((LPC_GPIOINT->IO2IntStatF >> 4) & 0x1){
 		LPC_GPIOINT->IO2IntClr = 0x1 << 4;
+		JOYSTICK_LEFT_FLAG = 1;
 	}
+	//joystick right
 	if((LPC_GPIOINT->IO0IntStatF >> 16) & 0x1){
 		LPC_GPIOINT->IO0IntClr = 0x1 << 16;
+		JOYSTICK_RIGHT_FLAG = 1;
 	}
 
     LPC_GPIOINT->IO0IntEnF |= 1 << 17; // center
-    LPC_GPIOINT->IO0IntEnF |= 1 << 15; // left
+    LPC_GPIOINT->IO0IntEnF |= 1 << 15; // down
     LPC_GPIOINT->IO0IntEnF |= 1 << 16; // right
     LPC_GPIOINT->IO2IntEnF |= 1 << 3; // up
-    LPC_GPIOINT->IO2IntEnF |= 1 << 4; // down
+    LPC_GPIOINT->IO2IntEnF |= 1 << 4; // left
 }
 
 /* ############################################################# */
@@ -578,7 +605,7 @@ void rgbBlinky (void){
 	}
 }
 
-void resetExplorer(void){ // reset all global variables and peripherals to initial values
+void resetHOPE(void){ // reset all global variables and peripherals to initial values
 
 	OPERATION_MODE = EXPLORER_MODE;
 
@@ -604,6 +631,7 @@ void resetExplorer(void){ // reset all global variables and peripherals to initi
 	flashBeginning = 0;
 	flashEnd = 0;
 	aboveThreshold = 0;
+	flashesToEnterSurvival = 3;
 
 	/* RESET FLAGS */
 	STOP_LED_COUNTDOWN = 0; // resets and stops led countdown in survival mode until < LIGHTNING_MONITORING
@@ -611,12 +639,22 @@ void resetExplorer(void){ // reset all global variables and peripherals to initi
 	SAMPLING_FLAG = 0;
 	NEW_LIGHTNING_FLAG = 0;
 	UPDATE7SEG_FLAG = 0;
+	JOYSTICK_UP_FLAG = 0;
+	JOYSTICK_DOWN_FLAG = 0;
+	JOYSTICK_PRESS_FLAG = 0;
+	JOYSTICK_LEFT_FLAG = 0;
+	JOYSTICK_RIGHT_FLAG = 0;
 	SEGMENT_DISPLAY = '0';
 
 	/* RESET PERIPHERALS */
 	pca9532_setLeds(0x0000, 0xffff);
-	led7seg_setChar(NULL, FALSE);
+	led7seg_setChar('\0', FALSE);
 	oled_clearScreen(OLED_COLOR_BLACK);
+	explorerMainDisplayInit();
+	explorerMainDisplaySelection = AVRG_READING_SELECTED;
+	explorerScreen = MAIN_SCREEN;
+	diagnostic_runs_count = 0;
+	explorer_diagnostic_display_page = 1;
 }
 
 /* ############################################################# */
@@ -629,7 +667,7 @@ void introDisplay(int hopePosition){
 	oled_putString(0,0,"====H.O.P.E.====",OLED_COLOR_BLACK,OLED_COLOR_WHITE);
 	oled_putString(0,35,"      MARS    ",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_circle(45, 35, 15, OLED_COLOR_WHITE);
-
+	// animation causing square to orbit around circle
 	switch(hopePosition){
 	case 0:
 		oled_rect(40,10,50,20,OLED_COLOR_WHITE);
@@ -658,15 +696,6 @@ void introDisplay(int hopePosition){
 	}
 }
 
-#define AVRG_READING_SELECTED 1
-#define CONTROL_FLASHES_SELECTED 2
-static int explorerMainDisplayMode = AVRG_READING_SELECTED; //default setting
-
-#define MAIN_SCREEN 0
-#define AVRG_READING_SCREEN 1
-#define CONTROL_FLASHES_SCREEN 2
-static int explorerScreen = 0;
-
 void explorerMainDisplayInit(){
 	JOYSTICK_UP_FLAG = 0;
 	JOYSTICK_DOWN_FLAG = 0;
@@ -674,7 +703,7 @@ void explorerMainDisplayInit(){
 
 	explorerDisplayClearScreen();
 	char array[20];
-	sprintf(array, "FtoSVR: %d", (int)flashesToEnterSurvivorDisplay);
+	sprintf(array, "FtoSVR: %d", (int)flashesToEnterSurvivalDisplay);
 	oled_putString(0,20,array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 
 	oled_putString(0,40,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
@@ -700,20 +729,7 @@ void explorerDisplayClearScreen(){
 	oled_putString(0,50,"                  ",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
-//values to track diagnostics and readings
-static int32_t avrg_light_value;
-static int32_t highest_light_value;
-static int32_t lowest_light_value;
-static int32_t avrg_temp_value;
-static int32_t highest_temp_value;
-static int32_t lowest_temp_value;
-static int32_t avrg_xyz_values[3];
-static int32_t highest_xyz_values[3];
-static int32_t lowest_xyz_values[3];
-static int diag_value_count = 0;
-static int explorer_avrg_display_page = 1;
-
-void explorerAvrgDisplay(int page){
+void explorerDiagnosticDisplay(int page){
 	char avrgArray[20];
 	char maxArray[20];
 	char minArray[20];
@@ -722,20 +738,20 @@ void explorerAvrgDisplay(int page){
 		sprintf(maxArray, "MAX-L%d", (int)highest_light_value);
 		sprintf(minArray, "MIN-L%d", (int)lowest_light_value);
 		explorerDisplayClearScreen();
+		oled_putString(0,20,"Light Readings",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 		oled_putString(0,30,(uint8_t*)avrgArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 		oled_putString(0,40,(uint8_t*)maxArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 		oled_putString(0,50,(uint8_t*)minArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,20,"Light Readings",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	}else if(page==2){
 		sprintf(avrgArray, "AVG-T%d", (int)avrg_temp_value);
 		sprintf(maxArray, "MAX-T%d", (int)highest_temp_value);
 		sprintf(minArray, "MIN-T%d", (int)lowest_temp_value);
 		explorerDisplayClearScreen();
+		oled_putString(0,20,"Temp Readings",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 		oled_putString(0,30,(uint8_t*)avrgArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 		oled_putString(0,40,(uint8_t*)maxArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 		oled_putString(0,50,(uint8_t*)minArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,20,"Temp Readings",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	}else{
+	}else if(page==3){
 		sprintf(avrgArray, "AVG/X%dY%d/Z%d", (int)*(avrg_xyz_values),
 				(int)*(avrg_xyz_values+1),(int)*(avrg_xyz_values+2));
 		sprintf(maxArray, "MAX/X%dY%dZ%d", (int)*(highest_xyz_values),
@@ -743,19 +759,19 @@ void explorerAvrgDisplay(int page){
 		sprintf(minArray, "MIN/X%dY%dZ%d", (int)*(lowest_xyz_values),
 				(int)*(lowest_xyz_values+1),(int)*(lowest_xyz_values+2));
 		explorerDisplayClearScreen();
+		oled_putString(0,20,"XYZ Readings",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 		oled_putString(0,30,(uint8_t*)avrgArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 		oled_putString(0,40,(uint8_t*)maxArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 		oled_putString(0,50,(uint8_t*)minArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-		oled_putString(0,20,"XYZ Readings",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	}
 }
 
 void explorerControlFlashesDisplay(){
 	explorerDisplayClearScreen();
 	char array[20];
-	sprintf(array, "mode to: %d", (int)flashesToEnterSurvivorDisplay);
-	oled_putString(0,30,"Change flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,40,"to enter svr",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	sprintf(array, "mode to: %d", (int)flashesToEnterSurvivalDisplay);
+	oled_putString(0,30,"Change #flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,"enter survival",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,50,(uint8_t*)array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
@@ -772,14 +788,14 @@ void explorerMainDisplayControl (){
 		if(JOYSTICK_DOWN_FLAG==1 || JOYSTICK_UP_FLAG==1){
 			JOYSTICK_DOWN_FLAG=0;
 			JOYSTICK_UP_FLAG=0;
-			if(explorerMainDisplayMode==AVRG_READING_SELECTED){
-				explorerMainDisplayMode=CONTROL_FLASHES_SELECTED;
-			}else if(explorerMainDisplayMode==CONTROL_FLASHES_SELECTED){
-				explorerMainDisplayMode=AVRG_READING_SELECTED;
+			if(explorerMainDisplaySelection==AVRG_READING_SELECTED){
+				explorerMainDisplaySelection=CONTROL_FLASHES_SELECTED;
+			}else if(explorerMainDisplaySelection==CONTROL_FLASHES_SELECTED){
+				explorerMainDisplaySelection=AVRG_READING_SELECTED;
 			}
 		}
 
-		switch(explorerMainDisplayMode){
+		switch(explorerMainDisplaySelection){
 
 		case AVRG_READING_SELECTED:
 			oled_putString(0,40,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
@@ -800,57 +816,83 @@ void explorerMainDisplayControl (){
 		if(JOYSTICK_DOWN_FLAG==1){
 			JOYSTICK_DOWN_FLAG=0;
 			explorerDisplayClearScreen();
-			if(flashesToEnterSurvivorDisplay>1)flashesToEnterSurvivorDisplay--;
+			if(flashesToEnterSurvivalDisplay>1)flashesToEnterSurvivalDisplay--;
 			explorerControlFlashesDisplay();
 		}else if (JOYSTICK_UP_FLAG==1){
 			JOYSTICK_UP_FLAG=0;
 			explorerDisplayClearScreen();
-			if(flashesToEnterSurvivorDisplay<9)flashesToEnterSurvivorDisplay++;
+			if(flashesToEnterSurvivalDisplay<9)flashesToEnterSurvivalDisplay++;
 			explorerControlFlashesDisplay();
 		}
 	}
 
-	if(JOYSTICK_PRESS_FLAG==1){
+	// joystick press or right confirms selection
+	if(JOYSTICK_PRESS_FLAG==1 || JOYSTICK_RIGHT_FLAG==1){
 		JOYSTICK_PRESS_FLAG=0;
+		JOYSTICK_RIGHT_FLAG=0;
 
 		switch(explorerScreen){
 
 		case MAIN_SCREEN:
 
 			//select average reading on main screen
-			if(explorerMainDisplayMode==AVRG_READING_SELECTED){
+			if(explorerMainDisplaySelection==AVRG_READING_SELECTED){
 				explorerScreen=AVRG_READING_SCREEN;
-				explorerAvrgDisplay(explorer_avrg_display_page);
-				explorer_avrg_display_page++;
+				explorerDiagnosticDisplay(explorer_diagnostic_display_page);
+				explorer_diagnostic_display_page++;
 
 			//select control flashes display
-			}else if(explorerMainDisplayMode==CONTROL_FLASHES_SELECTED){
+			}else if(explorerMainDisplaySelection==CONTROL_FLASHES_SELECTED){
 				explorerScreen=CONTROL_FLASHES_SCREEN;
-				flashesToEnterSurvivorDisplay=3;
+				flashesToEnterSurvivalDisplay=3;
 				explorerControlFlashesDisplay();
 			}
 			break;
 
 		//loop through arvg reading screen till end, return to main screen
 		case AVRG_READING_SCREEN:
-			if(explorer_avrg_display_page>3){
-				explorer_avrg_display_page=1;
-				explorerMainDisplayMode=AVRG_READING_SELECTED;
+			if(explorer_diagnostic_display_page>3){
+				explorer_diagnostic_display_page=1;
+				explorerMainDisplaySelection=AVRG_READING_SELECTED;
 				explorerScreen = MAIN_SCREEN;
 				explorerDisplayClearScreen();
 				explorerMainDisplayInit();
 			}else{
-				explorerAvrgDisplay(explorer_avrg_display_page);
-				explorer_avrg_display_page++;
+				explorerDiagnosticDisplay(explorer_diagnostic_display_page);
+				explorer_diagnostic_display_page++;
 			}
 			break;
 
 		//go back to main screen on click
 		case CONTROL_FLASHES_SCREEN:
-			explorerMainDisplayMode=AVRG_READING_SELECTED;
+			explorerMainDisplaySelection=CONTROL_FLASHES_SELECTED;
 			explorerScreen = MAIN_SCREEN;
-			flashesToEnterSurvivor = flashesToEnterSurvivorDisplay;
+			flashesToEnterSurvival = flashesToEnterSurvivalDisplay;
 			explorerDisplayClearScreen();
+			explorerMainDisplayInit();
+			break;
+		}
+	}
+
+	// joystick left cancels current action and returns to MAIN_SCREEN
+	if(JOYSTICK_LEFT_FLAG == 1){
+		JOYSTICK_LEFT_FLAG = 0;
+
+		switch(explorerScreen){
+
+		case MAIN_SCREEN: // do nothing
+			break;
+
+		case AVRG_READING_SCREEN:
+			explorer_diagnostic_display_page=1;
+			explorerMainDisplaySelection=AVRG_READING_SELECTED;
+			explorerScreen = MAIN_SCREEN;
+			explorerMainDisplayInit();
+			break;
+
+		case CONTROL_FLASHES_SCREEN:
+			explorerMainDisplaySelection=CONTROL_FLASHES_SELECTED;
+			explorerScreen = MAIN_SCREEN;
 			explorerMainDisplayInit();
 			break;
 		}
@@ -885,7 +927,7 @@ static void initializeHOPE(void){
 			introDisplay(oled_segment_display);
 		}else{
 			index=index+2; //to offset increase in oled_segment_display value
-			introDisplay(oled_segment_display-index);
+			introDisplay(oled_segment_display-index); //reverse animation
 		}
 
 		Timer0_Wait(1000); // 1s interval
@@ -897,7 +939,7 @@ static void initializeHOPE(void){
 		}
 
 	}
-	SEGMENT_DISPLAY = NULL;
+	SEGMENT_DISPLAY = '\0';
 	led7seg_setChar(SEGMENT_DISPLAY, FALSE); // clear 7 segment display
 	oled_clearScreen(OLED_COLOR_BLACK); //clear OLED screen
 
@@ -907,10 +949,26 @@ static void initializeHOPE(void){
 /* ##################### TASK HANDLERS ######################### */
 /* ############################################################# */
 
+void calcNewAvrgVal(int32_t *current_average, int32_t new_value, int diagnostic_runs_count){
+	*current_average = ((*current_average)*diagnostic_runs_count + new_value)/
+			(diagnostic_runs_count + 1);
+}
+
+void calcNewHighestVal(int32_t *current_highest, int32_t new_value){
+	if (*current_highest < new_value){
+		*current_highest = new_value;
+	}
+}
+
+void calcNewLowestVal(int32_t *current_lowest, int32_t new_value){
+	if (*current_lowest > new_value) {
+		*current_lowest = new_value;
+	}
+}
 
 void explorerDiagnosticLogic(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
-	//calculate all time average values for this run
-	if(diag_value_count==0){
+	//calculate all-time average values for this run
+	if(diagnostic_runs_count==0){
 		avrg_light_value = light_value;
 		highest_light_value = light_value;
 		lowest_light_value = light_value;
@@ -926,30 +984,32 @@ void explorerDiagnosticLogic(int32_t light_value, int32_t temp_value, int32_t *x
 		*(avrg_xyz_values+2) = *(xyz_values+2);
 		*(highest_xyz_values+1) = *(xyz_values+1);
 		*(lowest_xyz_values+1) = *(xyz_values+1);
-		diag_value_count++;
 	}else{
-		avrg_light_value = ((avrg_light_value)*diag_value_count+
-				light_value)/(diag_value_count+1);
+		avrg_light_value = ((avrg_light_value)*diagnostic_runs_count+
+				light_value)/(diagnostic_runs_count+1);
+		//calcNewAvrgVal(&avrg_light_value,light_value,diagnostic_runs_count);
 		if(highest_light_value<light_value)highest_light_value = light_value;
+		//calcNewHighestVal(&highest_light_value,light_value);
 		if(lowest_light_value>light_value)lowest_light_value = light_value;
-		avrg_temp_value = ((avrg_temp_value)*diag_value_count+
-				temp_value)/(diag_value_count+1);
+		//calcNewLowestVal(&lowest_light_value,light_value);
+		avrg_temp_value = ((avrg_temp_value)*diagnostic_runs_count+
+				temp_value)/(diagnostic_runs_count+1);
 		if(highest_temp_value<temp_value)highest_temp_value = temp_value;
 		if(lowest_temp_value>temp_value)lowest_temp_value = temp_value;
-		*avrg_xyz_values = ((*avrg_xyz_values)*diag_value_count+
-				(*xyz_values))/(diag_value_count+1);
+		*avrg_xyz_values = ((*avrg_xyz_values)*diagnostic_runs_count+
+				(*xyz_values))/(diagnostic_runs_count+1);
 		if((*highest_xyz_values)<(*xyz_values))(*highest_xyz_values) = (*xyz_values);
 		if((*lowest_xyz_values)>(*xyz_values))(*lowest_xyz_values) = (*xyz_values);
-		*(avrg_xyz_values+1) = ((*(avrg_xyz_values+1))*diag_value_count+
-				(*(xyz_values+1)))/(diag_value_count+1);
+		*(avrg_xyz_values+1) = ((*(avrg_xyz_values+1))*diagnostic_runs_count+
+				(*(xyz_values+1)))/(diagnostic_runs_count+1);
 		if((*(highest_xyz_values+1))<(*(xyz_values+1)))(*(highest_xyz_values+1)) = (*(xyz_values+1));
 		if((*(lowest_xyz_values+1))>(*(xyz_values+1)))(*(lowest_xyz_values+1)) = (*(xyz_values+1));
-		*(avrg_xyz_values+2) = ((*(avrg_xyz_values+2))*diag_value_count+
-				(*(xyz_values+2)))/(diag_value_count+1);
+		*(avrg_xyz_values+2) = ((*(avrg_xyz_values+2))*diagnostic_runs_count+
+				(*(xyz_values+2)))/(diagnostic_runs_count+1);
 		if((*(highest_xyz_values+2))<(*(xyz_values+2)))(*(highest_xyz_values+2)) = (*(xyz_values+2));
 		if((*(lowest_xyz_values+2))>(*(xyz_values+2)))(*(lowest_xyz_values+2)) = (*(xyz_values+2));
-		diag_value_count++;
 	}
+	diagnostic_runs_count++;
 }
 
 static void explorerTasks(void){
@@ -968,6 +1028,15 @@ static void explorerTasks(void){
 
 		explorerDiagnosticLogic(light_value, temp_value, xyz_values);
 	}
+
+	// CONDITION FOR SWITCHING TO SURVIVAL MODE
+	if (recentFlashesStackPointer >= flashesToEnterSurvival-1) {
+		OPERATION_MODE = SURVIVAL_MODE;
+		oled_clearScreen(OLED_COLOR_BLACK);
+		survivorDisplay();
+    	UART_Send(LPC_UART3, (uint8_t *)ENTER_SURVIVAL_MESSAGE , strlen(ENTER_SURVIVAL_MESSAGE), BLOCKING);
+	}
+
 	explorerMainDisplayControl();
 
 }
@@ -992,7 +1061,7 @@ static void genericTasks(void){
 		if (SEGMENT_DISPLAY != '1') { // minimum display '1'
 			SEGMENT_DISPLAY -= 1;
 		} else {
-			SEGMENT_DISPLAY = NULL; // turn off display
+			SEGMENT_DISPLAY = '\0'; // turn off display
 		}
 		UPDATE7SEG_FLAG = 1;
 	}
@@ -1010,21 +1079,13 @@ static void genericTasks(void){
 			recentFlashesStackPointer++; // increment only if pointer does not point outside the array
 		}
 
-		if (SEGMENT_DISPLAY == NULL) { // turn off 7 segment display
+		if (SEGMENT_DISPLAY == '\0') { // turn off 7 segment display
 			SEGMENT_DISPLAY = '1';
 			UPDATE7SEG_FLAG = 1;
 		} else if (SEGMENT_DISPLAY != '9') { // limit 7 segment display to '9'
 			SEGMENT_DISPLAY += 1;
 			UPDATE7SEG_FLAG = 1;
 		}
-	}
-
-	// CONDITION FOR SWITCHING TO SURVIVAL MODE
-	if ((recentFlashesStackPointer >= flashesToEnterSurvivor-1) && (OPERATION_MODE == EXPLORER_MODE)) {
-		OPERATION_MODE = SURVIVAL_MODE;
-		oled_clearScreen(OLED_COLOR_BLACK);
-		survivorDisplay();
-    	UART_Send(LPC_UART3, (uint8_t *)ENTER_SURVIVAL_MESSAGE , strlen(ENTER_SURVIVAL_MESSAGE), BLOCKING);
 	}
 
 	if (UPDATE7SEG_FLAG == 1) {
@@ -1066,10 +1127,6 @@ int main(void){
     temp_init(&getMsTicks);
     rotary_init();
 
-    // TEST MESSAGE
-    char msg[] = "hi";
-	UART_Send(LPC_UART3, (uint8_t *)msg, strlen(msg), BLOCKING);
-
     if(SysTick_Config(SystemCoreClock/1000)){
     	while(1); //capture error
     }
@@ -1088,8 +1145,9 @@ int main(void){
 	initializeHOPE();
     init_Interrupts();
     //variable to control detection of flashes to enter survivor
-    flashesToEnterSurvivorDisplay = flashesToEnterSurvivor;
+    flashesToEnterSurvivalDisplay = flashesToEnterSurvival;
     explorerMainDisplayInit();
+    init_Interrupts();
 
     uint8_t resetButtonSW4 = 1;
 
@@ -1097,7 +1155,7 @@ int main(void){
     {
     	resetButtonSW4 = (GPIO_ReadValue(1) >> 31) & 0x01; // SW4 polling mode
     	if (resetButtonSW4 == 0) {
-    		resetExplorer();
+    		resetHOPE();
     	}
 
     	genericTasks();
