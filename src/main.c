@@ -1046,6 +1046,15 @@ static void explorerTasks(void){
 
 		explorerDiagnosticLogic(light_value, temp_value, xyz_values);
 	}
+
+	// CONDITION FOR SWITCHING TO SURVIVAL MODE
+	if (recentFlashesStackPointer >= flashesToEnterSurvival-1) {
+		OPERATION_MODE = SURVIVAL_MODE;
+		oled_clearScreen(OLED_COLOR_BLACK);
+		survivorDisplay();
+    	UART_Send(LPC_UART3, (uint8_t *)ENTER_SURVIVAL_MESSAGE , strlen(ENTER_SURVIVAL_MESSAGE), BLOCKING);
+	}
+
 	explorerMainDisplayControl();
 
 }
@@ -1094,14 +1103,6 @@ static void genericTasks(void){
 			SEGMENT_DISPLAY += 1;
 			UPDATE7SEG_FLAG = 1;
 		}
-	}
-
-	// CONDITION FOR SWITCHING TO SURVIVAL MODE
-	if ((recentFlashesStackPointer >= flashesToEnterSurvival-1) && (OPERATION_MODE == EXPLORER_MODE)) {
-		OPERATION_MODE = SURVIVAL_MODE;
-		oled_clearScreen(OLED_COLOR_BLACK);
-		survivorDisplay();
-    	UART_Send(LPC_UART3, (uint8_t *)ENTER_SURVIVAL_MESSAGE , strlen(ENTER_SURVIVAL_MESSAGE), BLOCKING);
 	}
 
 	if (UPDATE7SEG_FLAG == 1) {
