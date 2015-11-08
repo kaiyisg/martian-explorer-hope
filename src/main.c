@@ -104,7 +104,7 @@ static int RGB_ON = 0;
 static uint32_t recentFlashes[9] = {0,0,0,0,0,0,0,0,0};
 
 // keeps track of how many flashes in past LIGHTNING_TIME_WINDOW
-static int recentFlashesStackPointer = -1;
+static int recentFlashesStackPointer = -1; // -1 since there are no values in array initially
 
 static int recentFlashesSize = sizeof(recentFlashes)/sizeof(recentFlashes[0]);
 
@@ -115,7 +115,7 @@ static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
 static int aboveThreshold = 0;
 
-uint8_t alarmNote = 'a';
+uint8_t alarmNote = 'C';
 
 /* ############################################################# */
 /* ################## DEFINING AND SYSTICK ##################### */
@@ -171,7 +171,6 @@ static void enableTimer(int timerNumber, uint32_t time){
 	TIM_ConfigMatch(TIMx,&TIM_MatchConfigStruct);
 	TIM_Cmd(TIMx, ENABLE);
 }
-
 
 /* ############################################################# */
 /* ############## INITIALIZING SSP, I2C, GPIO ################## */
@@ -357,16 +356,28 @@ static void playNote(uint32_t note, uint32_t durationMs) {
 
 static uint8_t changeNote(uint8_t note, uint8_t change){
 	if (change == HIGHER_NOTE) {
-		if (note != 'g') { // highest note is g
+		if (note == NULL) {
+			return 'C';
+		} else if (note != 'b') { // highest note is b
 			if (note == 'G') {
+				return 'A';
+			} else if (note == 'B'){
+				return 'c';
+			} else if (note == 'g') {
 				return 'a';
 			} else {
 				return note + 1;
 			}
 		}
 	} else if (change == LOWER_NOTE) {
-		if (note != 'A') { // lowest note is A
+		if (note == 'C') {
+			return NULL;
+		} else if (note != 'C') { // lowest note is C
 			if (note == 'a') {
+				return 'g';
+			} else if (note == 'c') {
+				return 'B';
+			} else if (note == 'A') {
 				return 'G';
 			} else {
 				return note - 1;
@@ -728,6 +739,10 @@ void init_Speaker(void){
     GPIO_ClearValue(0, 1<<27); //LM4811-clk
     GPIO_ClearValue(0, 1<<28); //LM4811-up/dn
     GPIO_ClearValue(2, 1<<13); //LM4811-shutdn
+}
+
+void beep(void){
+	playNote(getNote(alarmNote),50);
 }
 
 void resetExplorer(void){ // reset all global variables and peripherals to initial values
@@ -1186,13 +1201,13 @@ static void genericTasks(void){
 
 	if (NEW_LIGHTNING_FLAG == 1) {
 		NEW_LIGHTNING_FLAG = 0;
-		// Push new value of flashEnd into recentFlashes
+		// Push new value of flashBeginning into recentFlashes
 		int i=7;
 		while(i>=0){
 			recentFlashes[i+1]=recentFlashes[i]; //shift values to the right
 			i--;
 		}
-		recentFlashes[0] = flashEnd; // push new value into first element of array
+		recentFlashes[0] = flashBeginning; // push new value into first element of array
 		if (recentFlashesStackPointer != recentFlashesSize-1) {
 			recentFlashesStackPointer++; // increment only if pointer does not point outside the array
 		}
@@ -1206,17 +1221,17 @@ static void genericTasks(void){
 		}
 	}
 
-	if (UPDATE7SEG_FLAG == 1) {
-		UPDATE7SEG_FLAG = 0;
-		led7seg_setChar(SEGMENT_DISPLAY, FALSE);
-	}
-
 	// CONDITION FOR SWITCHING TO SURVIVAL MODE
 	if ((recentFlashesStackPointer >= 2) && (OPERATION_MODE == EXPLORER_MODE)) {
 		OPERATION_MODE = SURVIVAL_MODE;
 		oled_clearScreen(OLED_COLOR_BLACK);
 		survivorDisplay();
     	UART_Send(LPC_UART3, (uint8_t *)ENTER_SURVIVAL_MESSAGE , strlen(ENTER_SURVIVAL_MESSAGE), BLOCKING);
+	}
+
+	if (UPDATE7SEG_FLAG == 1) {
+		UPDATE7SEG_FLAG = 0;
+		led7seg_setChar(SEGMENT_DISPLAY, FALSE);
 	}
 
 	if (SW3_FLAG == 1) {
