@@ -114,9 +114,9 @@ static int aboveThreshold = 0;
 
 //variable to control Noise rejection for lightning detection
 //controls the number of flashes required to enter survivor mode
-static int flashesToEnterSurvivor = 3;
-int* survivorFlashPointer;
-static int flashesToEnterSurvivorDisplay;
+static int flashesToEnterSurvival = 3;
+int* survivalFlashPointer;
+static int flashesToEnterSurvivalDisplay;
 
 /* ############################################################# */
 /* ################## DEFINING AND SYSTICK ##################### */
@@ -754,7 +754,7 @@ void explorerAvrgDisplay(int page){
 void explorerSaveFlashesDisplay(void){
 	explorerDisplayClearScreen();
 	char array[20];
-	sprintf(array, "value: %d", (int)flashesToEnterSurvivorDisplay);
+	sprintf(array, "value: %d", (int)flashesToEnterSurvivalDisplay);
 	oled_putString(0,30,"Saving flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,40,(uint8_t*)array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
@@ -762,7 +762,7 @@ void explorerSaveFlashesDisplay(void){
 void explorerLoadFlashesDisplay(void){
 	explorerDisplayClearScreen();
 	char array[20];
-	sprintf(array, "value: %d", (int)flashesToEnterSurvivorDisplay);
+	sprintf(array, "value: %d", (int)flashesToEnterSurvivalDisplay);
 	oled_putString(0,30,"Loading flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,40,(uint8_t*)array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
@@ -770,7 +770,7 @@ void explorerLoadFlashesDisplay(void){
 void explorerControlFlashesDisplay(){
 	explorerDisplayClearScreen();
 	char array[20];
-	sprintf(array, "mode to: %d", (int)flashesToEnterSurvivorDisplay);
+	sprintf(array, "mode to: %d", (int)flashesToEnterSurvivalDisplay);
 	oled_putString(0,30,"Change flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,40,"to enter svr",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,50,(uint8_t*)array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
@@ -853,12 +853,12 @@ void explorerMainDisplayControl (){
 		if(JOYSTICK_DOWN_FLAG==1){
 			JOYSTICK_DOWN_FLAG=0;
 			explorerDisplayClearScreen();
-			if(flashesToEnterSurvivorDisplay>1)flashesToEnterSurvivorDisplay--;
+			if(flashesToEnterSurvivalDisplay>1)flashesToEnterSurvivalDisplay--;
 			explorerControlFlashesDisplay();
 		}else if (JOYSTICK_UP_FLAG==1){
 			JOYSTICK_UP_FLAG=0;
 			explorerDisplayClearScreen();
-			if(flashesToEnterSurvivorDisplay<9)flashesToEnterSurvivorDisplay++;
+			if(flashesToEnterSurvivalDisplay<9)flashesToEnterSurvivalDisplay++;
 			explorerControlFlashesDisplay();
 		}
 	}
@@ -879,20 +879,20 @@ void explorerMainDisplayControl (){
 			//select save flashes on main screen
 			}else if(explorerMainDisplayMode==SAVE_FLASHES_SELECTED){
 				explorerScreen=SAVE_FLASHES_SCREEN;
-				eeprom_write(survivorFlashPointer, 0x11, sizeof(int));
+				eeprom_write(survivalFlashPointer, 0x11, sizeof(int));
 				explorerSaveFlashesDisplay();
 
 			//select load flashes on main screen
 			}else if(explorerMainDisplayMode==LOAD_FLASHES_SELECTED){
 				explorerScreen=LOAD_FLASHES_SCREEN;
 				//how to check if read will give valid value?
-				eeprom_read(survivorFlashPointer, 0x11, sizeof(int));
+				eeprom_read(survivalFlashPointer, 0x11, sizeof(int));
 				explorerLoadFlashesDisplay();
 
 			//select control flashes display
 			}else if(explorerMainDisplayMode==CONTROL_FLASHES_SELECTED){
 				explorerScreen=CONTROL_FLASHES_SCREEN;
-				flashesToEnterSurvivorDisplay=3;
+				flashesToEnterSurvivalDisplay=3;
 				explorerControlFlashesDisplay();
 			}
 			break;
@@ -929,7 +929,7 @@ void explorerMainDisplayControl (){
 			explorerMainDisplayMode=AVRG_READING_SELECTED;
 			explorerScreen = MAIN_SCREEN;
 			explorerMainDisplayInit();
-			flashesToEnterSurvivor = flashesToEnterSurvivorDisplay;
+			flashesToEnterSurvival = flashesToEnterSurvivalDisplay;
 			break;
 		}
 	}
@@ -1097,7 +1097,7 @@ static void genericTasks(void){
 	}
 
 	// CONDITION FOR SWITCHING TO SURVIVAL MODE
-	if ((recentFlashesStackPointer >= flashesToEnterSurvivor-1) && (OPERATION_MODE == EXPLORER_MODE)) {
+	if ((recentFlashesStackPointer >= flashesToEnterSurvival-1) && (OPERATION_MODE == EXPLORER_MODE)) {
 		OPERATION_MODE = SURVIVAL_MODE;
 		oled_clearScreen(OLED_COLOR_BLACK);
 		survivorDisplay();
@@ -1168,9 +1168,9 @@ int main(void){
     explorerMainDisplayInit();
 
     uint8_t resetButtonSW4 = 1;
-    survivorFlashPointer = &flashesToEnterSurvivor; //pointer to save to eeprom
+    survivalFlashPointer = &flashesToEnterSurvival; //pointer to save to eeprom
     //variable to control detection of flashes to enter survivor
-    flashesToEnterSurvivorDisplay = flashesToEnterSurvivor;
+    flashesToEnterSurvivalDisplay = flashesToEnterSurvival;
 
     while (1)
     {
