@@ -616,7 +616,7 @@ void resetExplorer(void){ // reset all global variables and peripherals to initi
 
 	/* RESET PERIPHERALS */
 	pca9532_setLeds(0x0000, 0xffff);
-	led7seg_setChar(NULL, FALSE);
+	led7seg_setChar('\0', FALSE);
 	oled_clearScreen(OLED_COLOR_BLACK);
 }
 
@@ -975,7 +975,7 @@ static void initializeHOPE(void){
 		}
 
 	}
-	SEGMENT_DISPLAY = NULL;
+	SEGMENT_DISPLAY = '\0';
 	led7seg_setChar(SEGMENT_DISPLAY, FALSE); // clear 7 segment display
 	oled_clearScreen(OLED_COLOR_BLACK); //clear OLED screen
 
@@ -1069,7 +1069,7 @@ static void genericTasks(void){
 		if (SEGMENT_DISPLAY != '1') { // minimum display '1'
 			SEGMENT_DISPLAY -= 1;
 		} else {
-			SEGMENT_DISPLAY = NULL; // turn off display
+			SEGMENT_DISPLAY = '\0'; // turn off display
 		}
 		UPDATE7SEG_FLAG = 1;
 	}
@@ -1087,7 +1087,7 @@ static void genericTasks(void){
 			recentFlashesStackPointer++; // increment only if pointer does not point outside the array
 		}
 
-		if (SEGMENT_DISPLAY == NULL) { // turn off 7 segment display
+		if (SEGMENT_DISPLAY == '\0') { // turn off 7 segment display
 			SEGMENT_DISPLAY = '1';
 			UPDATE7SEG_FLAG = 1;
 		} else if (SEGMENT_DISPLAY != '9') { // limit 7 segment display to '9'
