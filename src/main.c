@@ -115,6 +115,12 @@ static uint32_t flashBeginning = 0;
 static uint32_t flashEnd = 0;
 static int aboveThreshold = 0;
 
+//variable to control Noise rejection for lightning detection
+//controls the number of flashes required to enter survivor mode
+static int flashesToEnterSurvivor = 3;
+int* survivorFlashPointer;
+static int flashesToEnterSurvivorDisplay;
+
 uint8_t alarmNote = 'C';
 
 /* ############################################################# */
@@ -826,16 +832,16 @@ void introDisplay(int hopePosition){
 }
 
 #define AVRG_READING_SELECTED 1
-#define SAVE_EEPROM_SELECTED 2
-#define LOAD_EEPROM_SELECTED 3
-#define CLEAR_EEPROM_SELECTED 4
+#define SAVE_FLASHES_SELECTED 2
+#define LOAD_FLASHES_SELECTED 3
+#define CONTROL_FLASHES_SELECTED 4
 static int explorerMainDisplayMode = AVRG_READING_SELECTED; //default setting
 
 #define MAIN_SCREEN 0
 #define AVRG_READING_SCREEN 1
-#define SAVE_EEPROM_SCREEN 2
-#define LOAD_EEPROM_SCREEN 3
-#define CLEAR_EEPROM_SCREEN 4
+#define SAVE_FLASHES_SCREEN 2
+#define LOAD_FLASHES_SCREEN 3
+#define CONTROL_FLASHES_SCREEN 4
 static int explorerScreen = 0;
 
 void explorerMainDisplayInit(){
@@ -843,9 +849,9 @@ void explorerMainDisplayInit(){
 	JOYSTICK_DOWN_FLAG = 0;
 	JOYSTICK_PRESS_FLAG = 0;
 	oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,30,"  Save Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,"  Load Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,50,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	explorerScreen = MAIN_SCREEN;
 }
 
@@ -917,83 +923,115 @@ void explorerAvrgDisplay(int page){
 	}
 }
 
-void explorerSaveEEPROMDisplay(void){
+void explorerSaveFlashesDisplay(void){
+	explorerDisplayClearScreen();
+	char array[20];
+	sprintf(array, "value: %d", (int)flashesToEnterSurvivorDisplay);
+	oled_putString(0,30,"Saving flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,(uint8_t*)array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
-void explorerLoadEEPROMDisplay(void){
+void explorerLoadFlashesDisplay(void){
+	explorerDisplayClearScreen();
+	char array[20];
+	sprintf(array, "value: %d", (int)flashesToEnterSurvivorDisplay);
+	oled_putString(0,30,"Loading flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,(uint8_t*)array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
-void explorerClearEEPROMDisplay(void){
-	oled_putString(0,20,"The values stored in",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,40,"EEPROM have been cleared!",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+void explorerControlFlashesDisplay(){
+	explorerDisplayClearScreen();
+	char array[20];
+	sprintf(array, "mode to: %d", (int)flashesToEnterSurvivorDisplay);
+	oled_putString(0,30,"Change flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,"to enter svr",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,50,(uint8_t*)array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
+
 
 void explorerMainDisplayControl (){
 
-	//joystick up and down only used in main screen
-	if(explorerScreen != MAIN_SCREEN){
-		JOYSTICK_DOWN_FLAG=0;
-		JOYSTICK_UP_FLAG=0;
+	//joystick up and down only used in main screen and flash control screen
+	if(explorerScreen != MAIN_SCREEN && explorerScreen != CONTROL_FLASHES_SCREEN){
+		JOYSTICK_DOWN_FLAG = 0;
+		JOYSTICK_UP_FLAG = 0;
 	}
 
-	if(JOYSTICK_DOWN_FLAG==1){
-		JOYSTICK_DOWN_FLAG=0;
-		if(explorerMainDisplayMode==AVRG_READING_SELECTED){
-			explorerMainDisplayMode=SAVE_EEPROM_SELECTED;
-		}else if(explorerMainDisplayMode==SAVE_EEPROM_SELECTED){
-			explorerMainDisplayMode=LOAD_EEPROM_SELECTED;
-		}else if(explorerMainDisplayMode==LOAD_EEPROM_SELECTED){
-			explorerMainDisplayMode=CLEAR_EEPROM_SELECTED;
-		}else if(explorerMainDisplayMode==CLEAR_EEPROM_SELECTED){
-			explorerMainDisplayMode=AVRG_READING_SELECTED;
-		}
-	}
-
-	if(JOYSTICK_UP_FLAG==1){
-		JOYSTICK_UP_FLAG=0;
-		if(explorerMainDisplayMode==AVRG_READING_SELECTED){
-			explorerMainDisplayMode=CLEAR_EEPROM_SELECTED;
-		}else if(explorerMainDisplayMode==SAVE_EEPROM_SELECTED){
-			explorerMainDisplayMode=AVRG_READING_SELECTED;
-		}else if(explorerMainDisplayMode==LOAD_EEPROM_SELECTED){
-			explorerMainDisplayMode=SAVE_EEPROM_SELECTED;
-		}else if(explorerMainDisplayMode==CLEAR_EEPROM_SELECTED){
-			explorerMainDisplayMode=LOAD_EEPROM_SELECTED;
-		}
-	}
 
 	if(explorerScreen == MAIN_SCREEN){
+
+		if(JOYSTICK_DOWN_FLAG==1){
+			JOYSTICK_DOWN_FLAG=0;
+			if(explorerMainDisplayMode==AVRG_READING_SELECTED){
+				explorerMainDisplayMode=SAVE_FLASHES_SELECTED;
+			}else if(explorerMainDisplayMode==SAVE_FLASHES_SELECTED){
+				explorerMainDisplayMode=LOAD_FLASHES_SELECTED;
+			}else if(explorerMainDisplayMode==LOAD_FLASHES_SELECTED){
+				explorerMainDisplayMode=CONTROL_FLASHES_SELECTED;
+			}else if(explorerMainDisplayMode==CONTROL_FLASHES_SELECTED){
+				explorerMainDisplayMode=AVRG_READING_SELECTED;
+			}
+		}
+
+		if(JOYSTICK_UP_FLAG==1){
+			JOYSTICK_UP_FLAG=0;
+			if(explorerMainDisplayMode==AVRG_READING_SELECTED){
+				explorerMainDisplayMode=CONTROL_FLASHES_SELECTED;
+			}else if(explorerMainDisplayMode==SAVE_FLASHES_SELECTED){
+				explorerMainDisplayMode=AVRG_READING_SELECTED;
+			}else if(explorerMainDisplayMode==LOAD_FLASHES_SELECTED){
+				explorerMainDisplayMode=SAVE_FLASHES_SELECTED;
+			}else if(explorerMainDisplayMode==CONTROL_FLASHES_SELECTED){
+				explorerMainDisplayMode=LOAD_FLASHES_SELECTED;
+			}
+		}
+
 		switch(explorerMainDisplayMode){
+
 		case AVRG_READING_SELECTED:
 			oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,30,"  Save Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"  Load Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 			break;
-		case SAVE_EEPROM_SELECTED:
-			oled_putString(0,30,"> Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		case SAVE_FLASHES_SELECTED:
+			oled_putString(0,30,"> Save Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 			oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"  Load Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 			break;
-		case LOAD_EEPROM_SELECTED:
-			oled_putString(0,40,"> Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		case LOAD_FLASHES_SELECTED:
+			oled_putString(0,40,"> Load Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 			oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,30,"  Save Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 			break;
-		case CLEAR_EEPROM_SELECTED:
-			oled_putString(0,50,"> Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+		case CONTROL_FLASHES_SELECTED:
+			oled_putString(0,50,"> Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 			oled_putString(0,20,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,30,"  Save Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"  Load Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 			break;
 		default:
 			oled_putString(0,20,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,30,"  Save>EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,40,"  Load<EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,50,"  Clear EEPROM",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,30,"  Save Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"  Load Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 			break;
+		}
+	}
+
+	else if (explorerScreen == CONTROL_FLASHES_SCREEN){
+		if(JOYSTICK_DOWN_FLAG==1){
+			JOYSTICK_DOWN_FLAG=0;
+			explorerDisplayClearScreen();
+			if(flashesToEnterSurvivorDisplay>1)flashesToEnterSurvivorDisplay--;
+			explorerControlFlashesDisplay();
+		}else if (JOYSTICK_UP_FLAG==1){
+			JOYSTICK_UP_FLAG=0;
+			explorerDisplayClearScreen();
+			if(flashesToEnterSurvivorDisplay<9)flashesToEnterSurvivorDisplay++;
+			explorerControlFlashesDisplay();
 		}
 	}
 
@@ -1010,20 +1048,24 @@ void explorerMainDisplayControl (){
 				explorerAvrgDisplay(explorer_avrg_display_page);
 				explorer_avrg_display_page++;
 
-			//select save eeprom on main screen
-			}else if(explorerMainDisplayMode==SAVE_EEPROM_SELECTED){
-				explorerScreen=SAVE_EEPROM_SCREEN;
-				explorerSaveEEPROMDisplay();
+			//select save flashes on main screen
+			}else if(explorerMainDisplayMode==SAVE_FLASHES_SELECTED){
+				explorerScreen=SAVE_FLASHES_SCREEN;
+				eeprom_write(survivorFlashPointer, 0x11, sizeof(int));
+				explorerSaveFlashesDisplay();
 
-			//select load eeprom on main screen
-			}else if(explorerMainDisplayMode==LOAD_EEPROM_SELECTED){
-				explorerScreen=LOAD_EEPROM_SCREEN;
-				explorerLoadEEPROMDisplay();
+			//select load flashes on main screen
+			}else if(explorerMainDisplayMode==LOAD_FLASHES_SELECTED){
+				explorerScreen=LOAD_FLASHES_SCREEN;
+				//how to check if read will give valid value?
+				eeprom_read(survivorFlashPointer, 0x11, sizeof(int));
+				explorerLoadFlashesDisplay();
 
-			//select clear eeprom on main screen
-			}else if(explorerMainDisplayMode==CLEAR_EEPROM_SELECTED){
-				explorerScreen=CLEAR_EEPROM_SCREEN;
-				explorerClearEEPROMDisplay();
+			//select control flashes display
+			}else if(explorerMainDisplayMode==CONTROL_FLASHES_SELECTED){
+				explorerScreen=CONTROL_FLASHES_SCREEN;
+				flashesToEnterSurvivorDisplay=3;
+				explorerControlFlashesDisplay();
 			}
 			break;
 
@@ -1041,21 +1083,25 @@ void explorerMainDisplayControl (){
 			break;
 
 		//go back to main screen on click
-		case SAVE_EEPROM_SCREEN:
-			explorerMainDisplayMode=MAIN_SCREEN;
+		case SAVE_FLASHES_SCREEN:
+			explorerMainDisplayMode=AVRG_READING_SELECTED;
+			explorerScreen = MAIN_SCREEN;
 			explorerMainDisplayInit();
 			break;
 
 		//go back to main screen on click
-		case LOAD_EEPROM_SCREEN:
-			explorerMainDisplayMode=MAIN_SCREEN;
+		case LOAD_FLASHES_SCREEN:
+			explorerMainDisplayMode=AVRG_READING_SELECTED;
+			explorerScreen = MAIN_SCREEN;
 			explorerMainDisplayInit();
 			break;
 
 		//go back to main screen on click
-		case CLEAR_EEPROM_SCREEN:
-			explorerMainDisplayMode=MAIN_SCREEN;
+		case CONTROL_FLASHES_SCREEN:
+			explorerMainDisplayMode=AVRG_READING_SELECTED;
+			explorerScreen = MAIN_SCREEN;
 			explorerMainDisplayInit();
+			flashesToEnterSurvivor = flashesToEnterSurvivorDisplay;
 			break;
 		}
 	}
@@ -1104,6 +1150,7 @@ static void initializeHOPE(void){
 	SEGMENT_DISPLAY = NULL;
 	led7seg_setChar(SEGMENT_DISPLAY, FALSE); // clear 7 segment display
 	oled_clearScreen(OLED_COLOR_BLACK); //clear OLED screen
+
 }
 
 /* ############################################################# */
@@ -1222,7 +1269,7 @@ static void genericTasks(void){
 	}
 
 	// CONDITION FOR SWITCHING TO SURVIVAL MODE
-	if ((recentFlashesStackPointer >= 2) && (OPERATION_MODE == EXPLORER_MODE)) {
+	if ((recentFlashesStackPointer >= flashesToEnterSurvivor-1) && (OPERATION_MODE == EXPLORER_MODE)) {
 		OPERATION_MODE = SURVIVAL_MODE;
 		oled_clearScreen(OLED_COLOR_BLACK);
 		survivorDisplay();
@@ -1267,6 +1314,7 @@ int main(void){
 	led7seg_init();
     temp_init(&getMsTicks);
     rotary_init();
+    eeprom_init();
 
     // TEST MESSAGE
     char msg[] = "hi";
@@ -1292,6 +1340,9 @@ int main(void){
     explorerMainDisplayInit();
 
     uint8_t resetButtonSW4 = 1;
+    survivorFlashPointer = &flashesToEnterSurvivor; //pointer to save to eeprom
+    //variable to control detection of flashes to enter survivor
+    flashesToEnterSurvivorDisplay = flashesToEnterSurvivor;
 
     while (1)
     {
