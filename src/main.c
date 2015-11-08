@@ -1287,7 +1287,7 @@ int main(void){
     // Initialize OLED
     oled_clearScreen(OLED_COLOR_BLACK);
 
-	//initializeHOPE();
+	initializeHOPE();
     init_Interrupts();
     explorerMainDisplayInit();
 
