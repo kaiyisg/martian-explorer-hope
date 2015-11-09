@@ -48,7 +48,8 @@
 /* ############################################################# */
 
 #define SAMPLING_TIME 2000 // ms, intervals sensor senses in explorer mode
-#define LIGHTNING_TIME_WINDOW 3000 // ms
+static uint32_t LIGHTNING_TIME_WINDOW = 3000; // ms, can be modified by user
+static uint32_t USER_LIGHTNING_TIME_WINDOW;
 #define LIGHTNING_MONITORING 3000 // lux
 #define LIGHTNING_THRESHOLD 3000 // lux
 #define TIME_UNIT 250 // ms
@@ -120,11 +121,13 @@ static int flashesToEnterSurvivalDisplay;
 //variables for OLED display
 #define AVRG_READING_SELECTED 1
 #define CONTROL_FLASHES_SELECTED 2
+#define TIME_TO_SURVIVAL_SELECTED 3
 static int explorerMainDisplaySelection = AVRG_READING_SELECTED; //default setting
 
 #define MAIN_SCREEN 0
 #define AVRG_READING_SCREEN 1
 #define CONTROL_FLASHES_SCREEN 2
+#define TIME_TO_SURVIVAL_SCREEN 3
 static int explorerScreen = 0;
 
 //values to track diagnostics and readings
@@ -344,6 +347,8 @@ static int JOYSTICK_DOWN_FLAG = 0;
 static int JOYSTICK_PRESS_FLAG = 0;
 static int JOYSTICK_LEFT_FLAG = 0;
 static int JOYSTICK_RIGHT_FLAG = 0;
+static int ROTARY_RIGHT_FLAG = 0;
+static int ROTARY_LEFT_FLAG = 0;
 
 void init_Priority(void){
 
@@ -497,9 +502,9 @@ void EINT3_IRQHandler(void){
 		uint8_t rotaryState;
 		rotaryState = rotary_read();
 		if (rotaryState == ROTARY_RIGHT) {
-			// do something
+			ROTARY_RIGHT_FLAG = 1;
 		} else if (rotaryState == ROTARY_LEFT) {
-			// do something
+			ROTARY_LEFT_FLAG = 1;
 		}
 	}
 
@@ -632,6 +637,7 @@ void resetHOPE(void){ // reset all global variables and peripherals to initial v
 	flashEnd = 0;
 	aboveThreshold = 0;
 	flashesToEnterSurvival = 3;
+	LIGHTNING_TIME_WINDOW = 3000;
 
 	/* RESET FLAGS */
 	STOP_LED_COUNTDOWN = 0; // resets and stops led countdown in survival mode until < LIGHTNING_MONITORING
@@ -644,6 +650,8 @@ void resetHOPE(void){ // reset all global variables and peripherals to initial v
 	JOYSTICK_PRESS_FLAG = 0;
 	JOYSTICK_LEFT_FLAG = 0;
 	JOYSTICK_RIGHT_FLAG = 0;
+	ROTARY_RIGHT_FLAG = 0;
+	ROTARY_LEFT_FLAG = 0;
 	SEGMENT_DISPLAY = '0';
 
 	/* RESET PERIPHERALS */
@@ -658,7 +666,7 @@ void resetHOPE(void){ // reset all global variables and peripherals to initial v
 }
 
 /* ############################################################# */
-/* ################## DEFINING OLED DISPLAY #################### */
+/* ################ DEFINING OLED DISPLAY GUI ################## */
 /* ############################################################# */
 
 void introDisplay(int hopePosition){
@@ -696,22 +704,26 @@ void introDisplay(int hopePosition){
 	}
 }
 
-void explorerMainDisplayInit(){
+void explorerMainDisplayInit(void){
 	JOYSTICK_UP_FLAG = 0;
 	JOYSTICK_DOWN_FLAG = 0;
 	JOYSTICK_PRESS_FLAG = 0;
+	JOYSTICK_LEFT_FLAG = 0;
+	JOYSTICK_RIGHT_FLAG = 0;
+	ROTARY_RIGHT_FLAG = 0;
+	ROTARY_LEFT_FLAG = 0;
 
 	explorerDisplayClearScreen();
 	char array[20];
-	sprintf(array, "FtoSVR: %d", (int)flashesToEnterSurvivalDisplay);
+	sprintf(array, "F to SVR: %d", (int)flashesToEnterSurvivalDisplay);
 	oled_putString(0,20,array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-
-	oled_putString(0,40,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-	oled_putString(0,50,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,30,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,50,"  Time to SVR",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	explorerScreen = MAIN_SCREEN;
 }
 
-//function to refresh the survival main display
+//function to refresh sensor values on main display in explorer mode
 void explorerMainDisplayRefresh(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 	char lightTempArray[20];
 	char xyzArray[20];
@@ -722,7 +734,7 @@ void explorerMainDisplayRefresh(int32_t light_value, int32_t temp_value, int32_t
 	oled_putString(0,10,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
-void explorerDisplayClearScreen(){
+void explorerDisplayClearScreen(void){
 	oled_putString(0,20,"                  ",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,30,"                  ",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 	oled_putString(0,40,"                  ",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
@@ -766,7 +778,7 @@ void explorerDiagnosticDisplay(int page){
 	}
 }
 
-void explorerControlFlashesDisplay(){
+void explorerControlFlashesDisplay(void){
 	explorerDisplayClearScreen();
 	char array[20];
 	sprintf(array, "mode to: %d", (int)flashesToEnterSurvivalDisplay);
@@ -775,7 +787,16 @@ void explorerControlFlashesDisplay(){
 	oled_putString(0,50,(uint8_t*)array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
-void explorerMainDisplayControl (){
+void explorerTimeToSurvivalDisplay(void){
+	explorerDisplayClearScreen();
+	char array[20];
+	sprintf(array, "%d ms", (int)USER_LIGHTNING_TIME_WINDOW);
+	oled_putString(0,30,"Change time",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,40,"to SVR:",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+	oled_putString(0,50,(uint8_t*)array,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+}
+
+void explorerMainDisplayControl (void){
 
 	//joystick up and down only used in main screen and flash control screen
 	if(explorerScreen != MAIN_SCREEN && explorerScreen != CONTROL_FLASHES_SCREEN){
@@ -785,40 +806,61 @@ void explorerMainDisplayControl (){
 
 	if(explorerScreen == MAIN_SCREEN){
 
-		if(JOYSTICK_DOWN_FLAG==1 || JOYSTICK_UP_FLAG==1){
+		if(JOYSTICK_DOWN_FLAG==1){
 			JOYSTICK_DOWN_FLAG=0;
-			JOYSTICK_UP_FLAG=0;
 			if(explorerMainDisplaySelection==AVRG_READING_SELECTED){
 				explorerMainDisplaySelection=CONTROL_FLASHES_SELECTED;
 			}else if(explorerMainDisplaySelection==CONTROL_FLASHES_SELECTED){
+				explorerMainDisplaySelection=TIME_TO_SURVIVAL_SELECTED;
+			}else if(explorerMainDisplaySelection==TIME_TO_SURVIVAL_SELECTED){
 				explorerMainDisplaySelection=AVRG_READING_SELECTED;
+			}
+		}
+
+		if(JOYSTICK_UP_FLAG==1){
+			JOYSTICK_UP_FLAG=0;
+			if(explorerMainDisplaySelection==AVRG_READING_SELECTED){
+				explorerMainDisplaySelection=TIME_TO_SURVIVAL_SELECTED;
+			}else if(explorerMainDisplaySelection==CONTROL_FLASHES_SELECTED){
+				explorerMainDisplaySelection=AVRG_READING_SELECTED;
+			}else if(explorerMainDisplaySelection==TIME_TO_SURVIVAL_SELECTED){
+				explorerMainDisplaySelection=CONTROL_FLASHES_SELECTED;
 			}
 		}
 
 		switch(explorerMainDisplaySelection){
 
 		case AVRG_READING_SELECTED:
-			oled_putString(0,40,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,50,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,30,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"  Time to SVR",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 			break;
 		case CONTROL_FLASHES_SELECTED:
-			oled_putString(0,40,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,50,"> Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,30,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"> Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"  Time to SVR",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			break;
+		case TIME_TO_SURVIVAL_SELECTED:
+			oled_putString(0,30,"  AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"> Time to SVR",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 			break;
 		default:
-			oled_putString(0,40,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
-			oled_putString(0,50,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,30,"> AVRG Reading",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,40,"  Control Flashes",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
+			oled_putString(0,50,"  Time to SVR",OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 			break;
 		}
 	}
 
+	// use joystick up and down to adjust number of flashes required to enter survival mode
 	else if (explorerScreen == CONTROL_FLASHES_SCREEN){
 		if(JOYSTICK_DOWN_FLAG==1){
 			JOYSTICK_DOWN_FLAG=0;
 			explorerDisplayClearScreen();
 			if(flashesToEnterSurvivalDisplay>1)flashesToEnterSurvivalDisplay--;
 			explorerControlFlashesDisplay();
-		}else if (JOYSTICK_UP_FLAG==1){
+		}else if(JOYSTICK_UP_FLAG==1){
 			JOYSTICK_UP_FLAG=0;
 			explorerDisplayClearScreen();
 			if(flashesToEnterSurvivalDisplay<9)flashesToEnterSurvivalDisplay++;
@@ -844,8 +886,13 @@ void explorerMainDisplayControl (){
 			//select control flashes display
 			}else if(explorerMainDisplaySelection==CONTROL_FLASHES_SELECTED){
 				explorerScreen=CONTROL_FLASHES_SCREEN;
-				flashesToEnterSurvivalDisplay=3;
+				flashesToEnterSurvivalDisplay=flashesToEnterSurvival;
 				explorerControlFlashesDisplay();
+
+			}else if(explorerMainDisplaySelection==TIME_TO_SURVIVAL_SELECTED){
+				explorerScreen=TIME_TO_SURVIVAL_SCREEN;
+				USER_LIGHTNING_TIME_WINDOW=LIGHTNING_TIME_WINDOW;
+				explorerTimeToSurvivalDisplay();
 			}
 			break;
 
@@ -868,6 +915,14 @@ void explorerMainDisplayControl (){
 			explorerMainDisplaySelection=CONTROL_FLASHES_SELECTED;
 			explorerScreen = MAIN_SCREEN;
 			flashesToEnterSurvival = flashesToEnterSurvivalDisplay;
+			explorerDisplayClearScreen();
+			explorerMainDisplayInit();
+			break;
+
+		case TIME_TO_SURVIVAL_SCREEN:
+			explorerMainDisplaySelection=TIME_TO_SURVIVAL_SELECTED;
+			explorerScreen = MAIN_SCREEN;
+			LIGHTNING_TIME_WINDOW = USER_LIGHTNING_TIME_WINDOW;
 			explorerDisplayClearScreen();
 			explorerMainDisplayInit();
 			break;
@@ -895,6 +950,27 @@ void explorerMainDisplayControl (){
 			explorerScreen = MAIN_SCREEN;
 			explorerMainDisplayInit();
 			break;
+
+		case TIME_TO_SURVIVAL_SCREEN:
+			explorerMainDisplaySelection=TIME_TO_SURVIVAL_SELECTED;
+			explorerScreen = MAIN_SCREEN;
+			explorerMainDisplayInit();
+		}
+	}
+
+	// use rotary right and left to adjust time window for lightning flashes
+	if(ROTARY_RIGHT_FLAG==1){
+		ROTARY_RIGHT_FLAG = 0;
+		if(explorerScreen==TIME_TO_SURVIVAL_SCREEN){
+			USER_LIGHTNING_TIME_WINDOW += 10;
+			explorerTimeToSurvivalDisplay();
+		}
+	}
+	if(ROTARY_LEFT_FLAG==1){
+		ROTARY_LEFT_FLAG = 0;
+		if(explorerScreen==TIME_TO_SURVIVAL_SCREEN){
+			USER_LIGHTNING_TIME_WINDOW -= 10;
+			explorerTimeToSurvivalDisplay();
 		}
 	}
 }
@@ -1146,6 +1222,7 @@ int main(void){
     init_Interrupts();
     //variable to control detection of flashes to enter survivor
     flashesToEnterSurvivalDisplay = flashesToEnterSurvival;
+    USER_LIGHTNING_TIME_WINDOW = LIGHTNING_TIME_WINDOW;
     explorerMainDisplayInit();
     init_Interrupts();
 
