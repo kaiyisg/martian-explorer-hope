@@ -55,9 +55,6 @@ static uint32_t USER_LIGHTNING_TIME_WINDOW;
 #define TIME_UNIT 250 // ms
 #define RANGE_K2 3892 // lux
 
-#define INDICATOR_EXPLORER RGB_BLUE
-#define INDICATOR_SURVIVAL RGB_RED
-
 static uint32_t CURRENT_TIME = 0;
 static uint32_t SEGMENT_DISPLAY = '0';
 
@@ -439,7 +436,7 @@ void lightning_Interrupt_Handler(void){
 		light_setLoThreshold(0); // disable low threshold
 
 		if (OPERATION_MODE == SURVIVAL_MODE) {
-			STOP_LED_COUNTDOWN = 0;
+			STOP_LED_COUNTDOWN = 0; // continue with led countdown sequence
 		}
 		flashEnd = getMsTicks();
 		uint32_t a=flashEnd;
@@ -486,7 +483,7 @@ void TIMER3_IRQHandler(void){ // Sampling Timer
 }
 
 void EINT3_IRQHandler(void){
-	if ((LPC_GPIOINT->IO2IntStatF) >> 5 & 0x1) { // Light Sensor Interrupt
+	if ((LPC_GPIOINT->IO2IntStatF >> 5) & 0x1) { // Light Sensor Interrupt
 		LPC_GPIOINT->IO2IntClr = (1<<5);
 		light_clearIrqStatus();
 		lightning_Interrupt_Handler();
@@ -533,12 +530,6 @@ void EINT3_IRQHandler(void){
 		LPC_GPIOINT->IO0IntClr = 0x1 << 16;
 		JOYSTICK_RIGHT_FLAG = 1;
 	}
-
-    LPC_GPIOINT->IO0IntEnF |= 1 << 17; // center
-    LPC_GPIOINT->IO0IntEnF |= 1 << 15; // down
-    LPC_GPIOINT->IO0IntEnF |= 1 << 16; // right
-    LPC_GPIOINT->IO2IntEnF |= 1 << 3; // up
-    LPC_GPIOINT->IO2IntEnF |= 1 << 4; // left
 }
 
 /* ############################################################# */
@@ -585,28 +576,19 @@ void printValues(int32_t light_value, int32_t temp_value, int32_t *xyz_values){
 	oled_putString(0,20,(uint8_t*)xyzArray,OLED_COLOR_WHITE,OLED_COLOR_BLACK);
 }
 
-// Function to toggle red and blue LEDs
-void new_rgb_setLeds(uint8_t ledMask){
+void rgbBlinky (void){
 	if (RGB_ON == 1) {
 		RGB_ON = 0; // toggle off
 		GPIO_ClearValue( 2, 1);
 		GPIO_ClearValue( 0, (1<<26) );
 	} else {
 		RGB_ON = 1; // toggle on
-		if ((ledMask & RGB_RED) != 0) {
-			GPIO_SetValue( 2, 1);
+		if (OPERATION_MODE == SURVIVAL_MODE) {
+			GPIO_SetValue( 2, 1); // red
 		}
-		if ((ledMask & RGB_BLUE) != 0) {
-			GPIO_SetValue( 0, (1<<26));
+		if (OPERATION_MODE == EXPLORER_MODE) {
+			GPIO_SetValue( 0, (1<<26)); // blue
 		}
-	}
-}
-
-void rgbBlinky (void){
-	if (OPERATION_MODE == EXPLORER_MODE) {
-		new_rgb_setLeds(INDICATOR_EXPLORER); // blue
-	} else {
-		new_rgb_setLeds(INDICATOR_SURVIVAL); // red
 	}
 }
 
@@ -1061,29 +1043,45 @@ void explorerDiagnosticLogic(int32_t light_value, int32_t temp_value, int32_t *x
 		*(highest_xyz_values+1) = *(xyz_values+1);
 		*(lowest_xyz_values+1) = *(xyz_values+1);
 	}else{
-		avrg_light_value = ((avrg_light_value)*diagnostic_runs_count+
-				light_value)/(diagnostic_runs_count+1);
-		//calcNewAvrgVal(&avrg_light_value,light_value,diagnostic_runs_count);
-		if(highest_light_value<light_value)highest_light_value = light_value;
-		//calcNewHighestVal(&highest_light_value,light_value);
-		if(lowest_light_value>light_value)lowest_light_value = light_value;
-		//calcNewLowestVal(&lowest_light_value,light_value);
-		avrg_temp_value = ((avrg_temp_value)*diagnostic_runs_count+
-				temp_value)/(diagnostic_runs_count+1);
-		if(highest_temp_value<temp_value)highest_temp_value = temp_value;
-		if(lowest_temp_value>temp_value)lowest_temp_value = temp_value;
-		*avrg_xyz_values = ((*avrg_xyz_values)*diagnostic_runs_count+
-				(*xyz_values))/(diagnostic_runs_count+1);
-		if((*highest_xyz_values)<(*xyz_values))(*highest_xyz_values) = (*xyz_values);
-		if((*lowest_xyz_values)>(*xyz_values))(*lowest_xyz_values) = (*xyz_values);
-		*(avrg_xyz_values+1) = ((*(avrg_xyz_values+1))*diagnostic_runs_count+
-				(*(xyz_values+1)))/(diagnostic_runs_count+1);
-		if((*(highest_xyz_values+1))<(*(xyz_values+1)))(*(highest_xyz_values+1)) = (*(xyz_values+1));
-		if((*(lowest_xyz_values+1))>(*(xyz_values+1)))(*(lowest_xyz_values+1)) = (*(xyz_values+1));
-		*(avrg_xyz_values+2) = ((*(avrg_xyz_values+2))*diagnostic_runs_count+
-				(*(xyz_values+2)))/(diagnostic_runs_count+1);
-		if((*(highest_xyz_values+2))<(*(xyz_values+2)))(*(highest_xyz_values+2)) = (*(xyz_values+2));
-		if((*(lowest_xyz_values+2))>(*(xyz_values+2)))(*(lowest_xyz_values+2)) = (*(xyz_values+2));
+//		avrg_light_value = ((avrg_light_value)*diagnostic_runs_count+
+//				light_value)/(diagnostic_runs_count+1);
+//		if(highest_light_value<light_value)highest_light_value = light_value;
+//		if(lowest_light_value>light_value)lowest_light_value = light_value;
+//		avrg_temp_value = ((avrg_temp_value)*diagnostic_runs_count+
+//				temp_value)/(diagnostic_runs_count+1);
+//		if(highest_temp_value<temp_value)highest_temp_value = temp_value;
+//		if(lowest_temp_value>temp_value)lowest_temp_value = temp_value;
+//		*avrg_xyz_values = ((*avrg_xyz_values)*diagnostic_runs_count+
+//				(*xyz_values))/(diagnostic_runs_count+1);
+//		if((*highest_xyz_values)<(*xyz_values))(*highest_xyz_values) = (*xyz_values);
+//		if((*lowest_xyz_values)>(*xyz_values))(*lowest_xyz_values) = (*xyz_values);
+//		*(avrg_xyz_values+1) = ((*(avrg_xyz_values+1))*diagnostic_runs_count+
+//				(*(xyz_values+1)))/(diagnostic_runs_count+1);
+//		if((*(highest_xyz_values+1))<(*(xyz_values+1)))(*(highest_xyz_values+1)) = (*(xyz_values+1));
+//		if((*(lowest_xyz_values+1))>(*(xyz_values+1)))(*(lowest_xyz_values+1)) = (*(xyz_values+1));
+//		*(avrg_xyz_values+2) = ((*(avrg_xyz_values+2))*diagnostic_runs_count+
+//				(*(xyz_values+2)))/(diagnostic_runs_count+1);
+//		if((*(highest_xyz_values+2))<(*(xyz_values+2)))(*(highest_xyz_values+2)) = (*(xyz_values+2));
+//		if((*(lowest_xyz_values+2))>(*(xyz_values+2)))(*(lowest_xyz_values+2)) = (*(xyz_values+2));
+
+		calcNewAvrgVal(&avrg_light_value,light_value,diagnostic_runs_count);
+		calcNewHighestVal(&highest_light_value,light_value);
+		calcNewLowestVal(&lowest_light_value,light_value);
+		calcNewAvrgVal(&avrg_temp_value,temp_value,diagnostic_runs_count);
+		calcNewHighestVal(&highest_temp_value,temp_value);
+		calcNewLowestVal(&lowest_temp_value,temp_value);
+		// x values
+		calcNewAvrgVal(avrg_xyz_values,xyz_values,diagnostic_runs_count);
+		calcNewHighestVal(highest_xyz_values,xyz_values);
+		calcNewLowestVal(lowest_xyz_values,xyz_values);
+		// y values
+		calcNewAvrgVal(avrg_xyz_values+1,xyz_values+1,diagnostic_runs_count);
+		calcNewHighestVal(highest_xyz_values+1,xyz_values+1);
+		calcNewLowestVal(lowest_xyz_values+1,xyz_values+1);
+		// z values
+		calcNewAvrgVal(avrg_xyz_values+2,xyz_values+2,diagnostic_runs_count);
+		calcNewHighestVal(highest_xyz_values+2,xyz_values+2);
+		calcNewLowestVal(lowest_xyz_values+2,xyz_values+2);
 	}
 	diagnostic_runs_count++;
 }
