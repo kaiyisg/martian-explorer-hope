@@ -2,7 +2,6 @@
 ## Introduction
 HOPE is a project based on the LPC17Xpresso baseboard and ARM-styled architecture LPC1769 microcontrollers, and models the logic behind an autonomous rover on mars, with capabilities of monitoring and broadcasting information on its surroundings, and self preservation during dangerous situations. 
 
-![HOPE Screenshot](docs/HOPE_HOMESCREEN.jpeg)
 
 ## Features
 
@@ -11,13 +10,13 @@ HOPE’s key functions involve sending data captured from it’s accelerometer, 
 ## How to Install
 
 You need the following hardware:
--LPCXpresso Base Board
--LPC1769 LPCXpresso Development Board
--Mini B to A USB Cable x 2
--Digi XBee RF-Module x 3
+- LPCXpresso Base Board
+- LPC1769 LPCXpresso Development Board
+- Mini B to A USB Cable x 2
+- Digi XBee RF-Module x 3
 
 You need the following software:
--A laptop installed with LPCXpresso IDE for debugging
+- A laptop installed with LPCXpresso IDE for debugging
 
 You need the following library projects, which must exist in the same workspace in order to build the project successfully:
 - CMSISv1p30_LPC17xx : for CMSIS 1.30 files relevant to LPC17xx
@@ -26,6 +25,8 @@ You need the following library projects, which must exist in the same workspace 
 
 
 If you want to see the source code, first clone this repository, then import it into your LPCXpresso IDE to debug.
+
+
 
 Cheers,
 
