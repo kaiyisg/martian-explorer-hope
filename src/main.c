@@ -183,7 +183,7 @@ static void enableTimer(int timerNumber, uint32_t time){
 	// Set Match value, count value is time (timer * 1000uS =timer mS )
 	TIM_MatchConfigStruct.MatchValue = time;
 
-	LPC_TIM_TypeDef *TIMx; // select Timer0, Timer1 or Timer2
+	LPC_TIM_TypeDef *TIMx; // select Timer1, Timer2 or Timer3
 	if (timerNumber == 1) {
 		TIMx = LPC_TIM1;
 	} else if (timerNumber == 2) {
@@ -597,6 +597,7 @@ void rgbBlinky (void){
 void resetHOPE(void){ // reset all global variables and peripherals to initial values
 
 	OPERATION_MODE = EXPLORER_MODE;
+	init_Interrupts();
 
 	/* Accelerometer Variables */
 	xoff = 0;
@@ -613,19 +614,16 @@ void resetHOPE(void){ // reset all global variables and peripherals to initial v
 
 	static uint32_t tempArray[9] = {0,0,0,0,0,0,0,0,0};
 	memcpy(recentFlashes, tempArray, recentFlashesSize);
-	recentFlashesStackPointer = -1; // keeps track of how many flashes in past LIGHTNING_TIME_WINDOW
+	recentFlashesStackPointer = -1;
 
-	// Timestamp checking beginning and end interrupt of each lightning flash that is > LIGHTNING_THRESHOLD
-	// Lightning flash only counted if flashEnd-flashBeginning<500ms
 	flashBeginning = 0;
 	flashEnd = 0;
-	aboveThreshold = 0;
 	flashesToEnterSurvival = 3;
 	clockwise_rotation = 0;
 	LIGHTNING_TIME_WINDOW = 3000;
 
 	/* RESET FLAGS */
-	STOP_LED_COUNTDOWN = 0; // resets and stops led countdown in survival mode until < LIGHTNING_MONITORING
+	STOP_LED_COUNTDOWN = 0;
 	SW3_FLAG = 0;
 	SAMPLING_FLAG = 0;
 	NEW_LIGHTNING_FLAG = 0;
@@ -645,7 +643,6 @@ void resetHOPE(void){ // reset all global variables and peripherals to initial v
 	oled_clearScreen(OLED_COLOR_BLACK);
 	explorerMainDisplayInit();
 	explorerMainDisplaySelection = AVRG_READING_SELECTED;
-	explorerScreen = MAIN_SCREEN;
 	diagnostic_runs_count = 0;
 	explorer_diagnostic_display_page = 1;
 }
@@ -1000,7 +997,7 @@ static void initializeHOPE(void){
 }
 
 /* ############################################################# */
-/* ##################### TASK HANDLERS ######################### */
+/* ################ SENSOR READINGS DIAGNOSTICS ################ */
 /* ############################################################# */
 
 void calcNewAvrgVal(int32_t *current_average, int32_t new_value, int diagnostic_runs_count){
@@ -1039,27 +1036,6 @@ void explorerDiagnosticLogic(int32_t light_value, int32_t temp_value, int32_t *x
 		*(highest_xyz_values+1) = *(xyz_values+1);
 		*(lowest_xyz_values+1) = *(xyz_values+1);
 	}else{
-//		avrg_light_value = ((avrg_light_value)*diagnostic_runs_count+
-//				light_value)/(diagnostic_runs_count+1);
-//		if(highest_light_value<light_value)highest_light_value = light_value;
-//		if(lowest_light_value>light_value)lowest_light_value = light_value;
-//		avrg_temp_value = ((avrg_temp_value)*diagnostic_runs_count+
-//				temp_value)/(diagnostic_runs_count+1);
-//		if(highest_temp_value<temp_value)highest_temp_value = temp_value;
-//		if(lowest_temp_value>temp_value)lowest_temp_value = temp_value;
-//		*avrg_xyz_values = ((*avrg_xyz_values)*diagnostic_runs_count+
-//				(*xyz_values))/(diagnostic_runs_count+1);
-//		if((*highest_xyz_values)<(*xyz_values))(*highest_xyz_values) = (*xyz_values);
-//		if((*lowest_xyz_values)>(*xyz_values))(*lowest_xyz_values) = (*xyz_values);
-//		*(avrg_xyz_values+1) = ((*(avrg_xyz_values+1))*diagnostic_runs_count+
-//				(*(xyz_values+1)))/(diagnostic_runs_count+1);
-//		if((*(highest_xyz_values+1))<(*(xyz_values+1)))(*(highest_xyz_values+1)) = (*(xyz_values+1));
-//		if((*(lowest_xyz_values+1))>(*(xyz_values+1)))(*(lowest_xyz_values+1)) = (*(xyz_values+1));
-//		*(avrg_xyz_values+2) = ((*(avrg_xyz_values+2))*diagnostic_runs_count+
-//				(*(xyz_values+2)))/(diagnostic_runs_count+1);
-//		if((*(highest_xyz_values+2))<(*(xyz_values+2)))(*(highest_xyz_values+2)) = (*(xyz_values+2));
-//		if((*(lowest_xyz_values+2))>(*(xyz_values+2)))(*(lowest_xyz_values+2)) = (*(xyz_values+2));
-
 		calcNewAvrgVal(&avrg_light_value,light_value,diagnostic_runs_count);
 		calcNewHighestVal(&highest_light_value,light_value);
 		calcNewLowestVal(&lowest_light_value,light_value);
@@ -1081,6 +1057,10 @@ void explorerDiagnosticLogic(int32_t light_value, int32_t temp_value, int32_t *x
 	}
 	diagnostic_runs_count++;
 }
+
+/* ############################################################# */
+/* ##################### TASK HANDLERS ######################### */
+/* ############################################################# */
 
 static void explorerTasks(void){
 
