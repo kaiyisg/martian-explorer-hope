@@ -2,7 +2,7 @@
 ## Introduction
 HOPE is a project based on the LPC17Xpresso baseboard and ARM-styled architecture LPC1769 microcontrollers, and models the logic behind an autonomous rover on mars, with capabilities of monitoring and broadcasting information on its surroundings, and self preservation during dangerous situations. 
 
-[HOPE Screenshot](HOPE_HOMESCREEN.jpeg)
+![HOPE Screenshot](docs/HOPE_HOMESCREEN.jpeg)
 
 ## Features
 
