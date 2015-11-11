@@ -20,6 +20,7 @@
 //remove j23 jumper at PIO1_10 to green RGB - disable green RGB
 //remove j20 top two jumpers for UART
 //put jumper in j58
+//removed jumper B on J7
 
 //include brief summary of program functioning
 
