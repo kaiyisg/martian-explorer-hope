@@ -115,6 +115,9 @@ static int aboveThreshold = 0;
 static int flashesToEnterSurvival = 3;
 static int flashesToEnterSurvivalDisplay;
 
+//track rotary switch rotation: negative value is counter-clockwise
+static int clockwise_rotation = 0;
+
 //variables for OLED display
 #define AVRG_READING_SELECTED 1
 #define CONTROL_FLASHES_SELECTED 2
@@ -494,8 +497,10 @@ void EINT3_IRQHandler(void){
 		rotaryState = rotary_read();
 		if (rotaryState == ROTARY_RIGHT) {
 			ROTARY_RIGHT_FLAG = 1;
+			clockwise_rotation+=1;
 		} else if (rotaryState == ROTARY_LEFT) {
 			ROTARY_LEFT_FLAG = 1;
+			clockwise_rotation-=1;
 		}
 	}
 
@@ -616,6 +621,7 @@ void resetHOPE(void){ // reset all global variables and peripherals to initial v
 	flashEnd = 0;
 	aboveThreshold = 0;
 	flashesToEnterSurvival = 3;
+	clockwise_rotation = 0;
 	LIGHTNING_TIME_WINDOW = 3000;
 
 	/* RESET FLAGS */
@@ -938,17 +944,12 @@ void explorerMainDisplayControl (void){
 	}
 
 	// use rotary right and left to adjust time window for lightning flashes
-	if(ROTARY_RIGHT_FLAG==1){
+	if(ROTARY_RIGHT_FLAG==1 || ROTARY_LEFT_FLAG==1){
 		ROTARY_RIGHT_FLAG = 0;
-		if(explorerScreen==TIME_TO_SURVIVAL_SCREEN){
-			USER_LIGHTNING_TIME_WINDOW += 10;
-			explorerTimeToSurvivalDisplay();
-		}
-	}
-	if(ROTARY_LEFT_FLAG==1){
 		ROTARY_LEFT_FLAG = 0;
 		if(explorerScreen==TIME_TO_SURVIVAL_SCREEN){
-			USER_LIGHTNING_TIME_WINDOW -= 10;
+			USER_LIGHTNING_TIME_WINDOW = USER_LIGHTNING_TIME_WINDOW + clockwise_rotation*10;
+			clockwise_rotation = 0;
 			explorerTimeToSurvivalDisplay();
 		}
 	}
