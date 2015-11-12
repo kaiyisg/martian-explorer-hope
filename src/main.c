@@ -1189,14 +1189,14 @@ int main(void){
 
     // Initialize OLED
     oled_clearScreen(OLED_COLOR_BLACK);
-
 	initializeHOPE();
-    init_Interrupts();
+
     //variable to control detection of flashes to enter survivor
     flashesToEnterSurvivalDisplay = flashesToEnterSurvival;
     USER_LIGHTNING_TIME_WINDOW = LIGHTNING_TIME_WINDOW;
-    explorerMainDisplayInit();
     init_Interrupts();
+    explorerMainDisplayInit();
+    light_setRange(LIGHT_RANGE_4000);
 
     uint8_t resetButtonSW4 = 1;
 
