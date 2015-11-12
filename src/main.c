@@ -1076,10 +1076,8 @@ static void explorerTasks(void){
 		snprintf(msg,sizeof(msg),"L%d_T%d_AX%d_AY%d_AZ%d\r\n",(int)light_value,(int)temp_value,
 				(int)*(xyz_values),(int)*(xyz_values+1),(int)*(xyz_values+2));
 		UART_Send(LPC_UART3, (uint8_t *)msg, strlen(msg), BLOCKING);
-
 		explorerDiagnosticLogic(light_value, temp_value, xyz_values);
 	}
-
 	explorerMainDisplayControl();
 
 	// CONDITION FOR SWITCHING TO SURVIVAL MODE
