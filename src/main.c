@@ -410,6 +410,7 @@ void init_Interrupts(void){
         light_setHiThreshold(LIGHTNING_THRESHOLD);
         light_setLoThreshold(0); // disable low threshold
     }
+
     // clear interrupts before enabling
     LPC_GPIOINT->IO2IntClr = 1 << 5;
     LPC_GPIOINT->IO2IntClr = 1 << 10;
@@ -606,13 +607,9 @@ void resetHOPE(void){ // reset all global variables and peripherals to initial v
 	init_Interrupts();
 
 	/* Accelerometer Variables */
-	xoff = 0;
-	yoff = 0;
-	zoff = 0;
-
     acc_read(&x, &y, &z);
-    xoff = 0;
-    yoff = 0;
+    xoff = 0-x;
+    yoff = 0-y;
     zoff = 0-z;
 
 	ledOn = 0xffff; // pca9532 led bit pattern
@@ -651,6 +648,7 @@ void resetHOPE(void){ // reset all global variables and peripherals to initial v
 	explorerMainDisplaySelection = AVRG_READING_SELECTED;
 	diagnostic_runs_count = 0;
 	explorer_diagnostic_display_page = 1;
+	light_setRange(LIGHT_RANGE_4000);
 }
 
 /* ############################################################# */
@@ -1188,8 +1186,8 @@ int main(void){
      * Assume base board in zero-g position when reading first value.
      */
     acc_read(&x, &y, &z);
-    xoff = 0;
-    yoff = 0;
+    xoff = 0-x;
+    yoff = 0-y;
     zoff = 0-z;
 
     // Initialize OLED
