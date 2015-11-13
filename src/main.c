@@ -3,14 +3,19 @@
  *
  *   Daryl Yong & Lee Kai Yi, EE2024 Lab B3
  *
+ *   HOPE is a project based on the LPC17Xpresso baseboard and ARM-styled
+ *   architecture LPC1769 microcontrollers, and models the logic behind an
+ *   autonomous rover on mars, with capabilities of monitoring and
+ *   broadcasting information on its surroundings, and self preservation
+ *   during dangerous situations.
+ *
+ *   HOPE’s key functions involve sending data captured from it’s
+ *   accelerometer, light sensor, and temperature sensor, to a transmission
+ *   relay, HOME, computer terminal connected to it through UART. Several of
+ *   HOPE's key configurations can also be externally controlled by a GUI
+ *   displayed on the OLED display, controlled by the joystick.
+ *
  ******************************************************************************/
-
-
-//sw1 that allows the baseboard to reinitialize tilt value
-
-//assignment hints:
-//modify temp_read in a better way, rewrite it because you use a polling approach,
-//can use interrupt approach to rewrite it (every few miliseconds check, then figure out duty cycle?)
 
 
 //############# JUMPER CONFIGURATION ###############
