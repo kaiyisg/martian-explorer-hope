@@ -26,8 +26,7 @@ You need the following library projects, which must exist in the same workspace 
 
 If you want to see the source code, first clone this repository, then import it into your LPCXpresso IDE to debug.
 
+## Contributors
 
-
-Cheers,
-
-Kai Yi & Daryl
+    Kai Yi
+    Daryl
